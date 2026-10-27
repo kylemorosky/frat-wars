@@ -25,6 +25,10 @@ Open `index.html` in a browser. It's a single file with no build step. Progress 
 | Nerf Sniper | Long range (Chapter LV 2) |
 | Couch Tank | Heavy tank that targets defenses (Chapter LV 3) |
 
+### Maps
+
+Use the arrows above the lawn to switch your chapter's map: Grassland, Forest, Desert or Snow. Each has its own ground and scenery (trees, bushes, cacti, rocks). Scenery is cosmetic and hides under any building placed on it. Rival bases you scout get a random map.
+
 ### Raids
 
 - Drop troops on open lawn, outside the red zone around enemy buildings.
@@ -35,3 +39,5 @@ Open `index.html` in a browser. It's a single file with no build step. Progress 
 ### Rivals
 
 Rival frats raid you while you're away. How much they take depends on your defenses. The Rivals tab lists who hit you, and a Revenge raid lets you win back what they took.
+
+The "Sponsored" card on the home screen is a placeholder ad with made-up brands. Close it with the ✕.
