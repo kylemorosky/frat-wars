@@ -10,10 +10,10 @@ Open `index.html` in a browser. It's a single file with no build step. Progress 
 
 The tab bar at the bottom switches between four pages any time you're not in a match:
 
-- **Base:** your chapter lawn. Build, upgrade, collect, switch maps, and check Rivals.
+- **Base:** your chapter lawn. Build, upgrade, collect, and check Rivals.
 - **Shop:** gifts you can buy with Gems or Dues. Each purchase asks you to confirm first.
 - **Troops:** every troop with its stats. Recruit them with Clout and pick up to 5 types to bring into your next match. Locked troops show what unlocks them.
-- **Lobby:** your loadout and the rival you'll face. Hit **Ready** to start the match.
+- **Lobby:** your player name, your loadout and the rival you'll face. Hit **Ready** to start the match.
 
 Resources:
 
@@ -34,10 +34,6 @@ Resources:
 | Frisbee Bro | Tough, quick melee (Chapter LV 2) |
 | Nerf Sniper | Long range (Chapter LV 2) |
 | Couch Tank | Heavy tank that targets defenses (Chapter LV 3) |
-
-### Maps
-
-Use the arrows above the lawn to switch your chapter's map: Grassland, Forest, Desert or Snow. Each has its own ground and scenery (trees, bushes, cacti, rocks). Scenery is cosmetic and hides under any building placed on it. Each rival you face in the Lobby gets a random map.
 
 ### Raids
 
