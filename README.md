@@ -4,7 +4,7 @@ A frat-row base builder in the spirit of Clash of Clans. Grow your chapter, stoc
 
 ## Play
 
-Open `index.html` in a browser. It's a single file with no build step. Progress saves in your browser's local storage.
+Open `index.html` in a browser. There's no build step. `index.html` holds the game, and `config.js` holds the numbers you can tune; keep them in the same folder. Progress saves in your browser's local storage.
 
 ## How it plays
 
@@ -14,6 +14,8 @@ The tab bar at the bottom switches between four pages any time you're not in a m
 - **Shop:** gifts you can buy with Gems or Dues. Each purchase asks you to confirm first.
 - **Troops:** every troop with its stats. Recruit them with Clout and pick up to 5 types to bring into your next match. Locked troops show what unlocks them.
 - **Lobby:** your player name, your loadout and the rival you'll face. Hit **Ready** to start the match.
+
+A match runs Lobby → Ready (a short countdown) → Match → Results (Victory or Defeat, with time, troops sent, troops lost and rewards) → **Return to lobby**. You can play as many CPU matches in a row as you like.
 
 Resources:
 

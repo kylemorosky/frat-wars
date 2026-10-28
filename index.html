@@ -302,6 +302,7 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
 </aside>
 <div id="toast" hidden></div>
 
+<script src="config.js"></script>
 <script>
 (()=>{
 const $=id=>document.getElementById(id);
@@ -349,6 +350,8 @@ const P={
 };
 const RAGER_TIME=8,AURA=2.8;
 const GREEK='ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ';
+const CFG=window.GR_CONFIG;
+if(!CFG)throw new Error('config.js did not load. It must sit next to index.html.');
 const PLAYER_NAME='James M';
 const LOADOUT_MAX=5,DEFAULT_LOADOUT=['swarm','balloon','light','gargoyle'];
 
@@ -457,14 +460,23 @@ function processAway(){
   if(!n)return;
   for(let i=0;i<n;i++)rivalRaid();
   save();
-  if(mode==='home'&&$('sheet').hidden)openRivals(true);else renderAll();
+  if(Match.state==='Lobby'&&$('sheet').hidden)openRivals(true);else renderAll();
 }
 
 /* ---------- state ---------- */
-let mode='home';            // home (menu pages) | attack (match running)
-let page='base';            // base | shop | troops | lobby
+/* ---------- match flow ----------
+   Match.state is the one owner of where the player is:
+   Lobby (menu pages) -> Ready (countdown) -> InMatch -> Results -> Lobby.
+   go() refuses any other transition, so double clicks and late timers are no-ops. */
+const Match={
+  state:'Lobby',
+  edges:{Lobby:['Ready'],Ready:['InMatch','Lobby'],InMatch:['Results'],Results:['Lobby']},
+  go(to){if(!this.edges[this.state].includes(to))return false;this.state=to;return true},
+};
+const inMenus=()=>Match.state==='Lobby';
+let page='base';            // which menu page shows while in the Lobby state: base | shop | troops | lobby
 let ui={sel:null,place:null,move:false,ghost:null};
-let A=null;                 // the lobby's opponent, and the raid state once the match starts
+let A=null;                 // the lobby's opponent, and the match state once Ready is pressed. Rebuilt for every match.
 let floats=[];
 const cv=$('board');let ctx=cv.getContext('2d');let scale=1;
 
@@ -503,14 +515,30 @@ const inLoadout=()=>G.loadout.filter(k=>CL()>=T[k].unlock);
 function nextSel(){const t=inLoadout().find(k=>(G.army[k]||0)>0);if(t)return t;const p=Object.keys(P).find(k=>(G.pranks[k]||0)>0);return p?'p:'+p:null}
 function findOpponent(rev){
   const base=rivalBase(rev);
-  A={base,bs:base.buildings,units:[],projs:[],fx:[],zones:[],t:150,sel:null,deployed:0,over:false,pct:0,stars:0,chapterDown:false,hype:0,rager:0,revenge:rev||null,forbid:forbidGrid(base.buildings)};
+  A={base,bs:base.buildings,units:[],projs:[],fx:[],zones:[],t:CFG.match.duration,sel:null,deployed:0,lost:0,pct:0,stars:0,chapterDown:false,hype:0,rager:0,
+    revenge:rev||null,forbid:forbidGrid(base.buildings),readyT:0,endIn:null,result:null};
 }
+// Lobby -> Ready: the Ready button. A second press while Ready is already running is refused by Match.go.
 function startMatch(){
-  if(!A)findOpponent();
+  if(!inMenus())return;
   if(!inLoadout().some(k=>(G.army[k]||0)>0)){toast('None of your selected troops are recruited. Pick or recruit some on the Troops page.');return}
-  A.sel=nextSel();
+  if(!Match.go('Ready'))return;
+  if(!A)findOpponent();
+  A.sel=nextSel();A.readyT=CFG.match.readySeconds;
   if(G.hypeStart){A.hype=50;G.hypeStart=false;save()}
-  mode='attack';ui={sel:null,place:null,move:false,ghost:null};renderAll();
+  ui={sel:null,place:null,move:false,ghost:null};renderAll();
+}
+// Ready -> InMatch once the countdown runs out
+function tickReady(dt){
+  A.readyT-=dt;
+  if(A.readyT<=0&&Match.go('InMatch'))renderAll();
+}
+// Results -> Lobby. Drops every piece of the finished match so the next one starts clean.
+function returnToLobby(){
+  if(!Match.go('Lobby'))return;
+  stopHold();A=null;floats=[];holdPos=null;
+  ui={sel:null,place:null,move:false,ghost:null};
+  closeSheet();page='lobby';renderAll();
 }
 
 /* ---------- raid simulation ---------- */
@@ -539,7 +567,7 @@ function damageB(b,d){
     A.pct=Math.floor(down/all.length*100);
     A.stars=A.pct===100?3:(A.pct>=50?1:0)+(A.chapterDown?1:0);
     A.forbid=forbidGrid(A.bs.filter(o=>o.alive));
-    if(A.pct===100)setTimeout(endRaid,600);
+    if(A.pct===100&&A.endIn==null)A.endIn=CFG.match.endDelay;
   }
 }
 function castPrank(k,x,y){
@@ -553,14 +581,14 @@ function castPrank(k,x,y){
   renderBottom();
 }
 function throwRager(){
-  if(!A||A.over||mode!=='attack')return;
+  if(Match.state!=='InMatch')return;
   if(A.rager>0)return;
   if(A.hype<100){toast(`Hype is at ${Math.floor(A.hype)}%. Knock down buildings to build it up.`);return}
   if(!A.units.length){toast('Get some troops on the lawn first.');return}
   A.hype=0;A.rager=RAGER_TIME;toast('RAGER! Troops hit harder and move faster.');renderBottom();
 }
 function deployAt(x,y){
-  if(mode!=='attack'||A.over||!A.sel)return;
+  if(Match.state!=='InMatch'||!A.sel)return;
   if(A.sel.startsWith('p:'))return castPrank(A.sel.slice(2),x,y);
   const k=A.sel;
   if(!(G.army[k]>0)){toast(`No ${T[k].name}s left. Pick another troop.`);return}
@@ -637,32 +665,38 @@ function stepRaid(dt){
     }else{p.x+=dx/d*s;p.y+=dy/d*s}
   }
   A.projs=A.projs.filter(p=>!p.done);
-  A.units=A.units.filter(u=>{if(u.hp<=0){A.fx.push({type:'pow',x:u.x,y:u.y,t:.25,max:.25});return false}return true});
+  A.units=A.units.filter(u=>{if(u.hp<=0){A.lost++;A.fx.push({type:'pow',x:u.x,y:u.y,t:.25,max:.25});return false}return true});
   for(const f of A.fx)f.t-=dt;A.fx=A.fx.filter(f=>f.t>0);
   const left=inLoadout().some(k=>(G.army[k]||0)>0);
-  if(A.t<=0||(A.deployed>0&&!A.units.length&&!left)){A.t=Math.max(0,A.t);endRaid()}
+  if(A.endIn!=null)A.endIn-=dt;
+  if(A.t<=0||(A.deployed>0&&!A.units.length&&!left)||(A.endIn!=null&&A.endIn<=0)){A.t=Math.max(0,A.t);finishMatch()}
   updateRaidHud();
 }
-function endRaid(){
-  if(!A||A.over)return;
-  A.over=true;
+// InMatch -> Results. Rewards are paid here and only here, so they land exactly once per match.
+function finishMatch(){
+  if(!Match.go('Results'))return;
+  stopHold();
   const c=cap();
   const gd=Math.max(0,Math.min(Math.floor(A.base.loot.dues*A.pct/100),Math.floor(c-G.dues)));
   const gc=Math.max(0,Math.min(Math.floor(A.base.loot.clout*A.pct/100),Math.floor(c-G.clout)));
   G.dues+=gd;G.clout+=gc;
-  const gg=A.stars*2;G.gems+=gg;
+  const gg=A.stars*CFG.match.gemsPerStar;G.gems+=gg;
   let rep=A.stars?A.stars*8+Math.max(0,A.base.lvl-CL())*4:-5;
   const avenged=A.revenge&&A.stars>0;
   if(avenged){rep+=6;const e=G.log.find(x=>x.id===A.revenge.id);if(e)e.avenged=true}
   G.rep=Math.max(0,G.rep+rep);save();
+  const won=A.stars>0,secs=Math.round(CFG.match.duration-A.t);
+  A.result={won,dues:gd,clout:gc,gems:gg,rep};
   const st=[0,1,2].map(i=>i<A.stars?'★':'<span class="off">★</span>').join('');
-  openSheet(`<div class="head"><h3 style="color:${A.stars?'var(--gold)':'var(--danger)'}">${A.stars?'Raid won':'Raid failed'}</h3></div>
+  openSheet(`<div class="head"><h3 style="color:${won?'var(--gold)':'var(--danger)'}">${won?'Victory':'Defeat'}</h3></div>
     <div class="big-stars">${st}</div>
     <p style="text-align:center;margin:0;font-size:18px">${A.pct}% of ${A.base.name} destroyed${A.chapterDown?', Chapter House down':''}.</p>
+    <div class="stats" style="justify-content:center"><span>Time <b>${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}</b></span><span>Troops sent <b>${A.deployed}</b></span><span>Troops lost <b>${A.lost}</b></span></div>
     <div class="loot"><span class="d">+${fmt(gd)} Dues</span><span class="c">+${fmt(gc)} Clout</span>${gg?`<span class="g">+${gg} Gems</span>`:''}</div>
     <p style="text-align:center;margin:0;color:var(--muted)">Rep ${rep>=0?'+':''}${rep}${avenged?' · Revenge served':''}</p>
-    <button class="btn" id="homeBtn">Back to the chapter</button>`,true);
-  $('homeBtn').onclick=()=>{closeSheet();mode='home';A=null;setPage('base')};
+    <button class="btn" id="lobbyBtn">Return to lobby</button>`,true);
+  $('lobbyBtn').onclick=returnToLobby;
+  renderAll();
 }
 
 /* ---------- drawing ---------- */
@@ -697,7 +731,7 @@ function buildLawn(){
   const v=g.createRadialGradient(LOG/2,LOG/2,LOG*.3,LOG/2,LOG/2,LOG*.78);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,`rgba(0,0,0,${LAWN.vignette})`);g.fillStyle=v;g.fillRect(0,0,LOG,LOG);
   lawnCv=c;lawnScale=scale;
 }
-const showingRival=()=>!!A&&(mode==='attack'||page==='lobby');
+const showingRival=()=>!!A&&(!inMenus()||page==='lobby');
 function drawLawn(){if(!lawnCv||lawnScale!==scale)buildLawn();ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(lawnCv,0,0);ctx.restore()}
 
 // scenery sits mostly on the outer two rings of tiles, where buildings rarely go
@@ -1044,13 +1078,21 @@ function draw(){
     for(const u of A.units)if(T[u.k].air)drawUnit(u);
     for(const p of A.projs)drawProj(p);
     for(const f of A.fx)drawFx(f);
-    if(mode==='attack'&&A.sel&&A.sel.startsWith('p:')&&holdPos){const p=P[A.sel.slice(2)];ctx.strokeStyle='rgba(224,85,155,.8)';ctx.lineWidth=1.5;ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(holdPos.x*TS,holdPos.y*TS,p.r*TS,0,7);ctx.stroke();ctx.setLineDash([])}
+    if(Match.state==='InMatch'&&A.sel&&A.sel.startsWith('p:')&&holdPos){const p=P[A.sel.slice(2)];ctx.strokeStyle='rgba(224,85,155,.8)';ctx.lineWidth=1.5;ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(holdPos.x*TS,holdPos.y*TS,p.r*TS,0,7);ctx.stroke();ctx.setLineDash([])}
     if(A.rager>0){
       const t=performance.now()/1000,still=matchMedia('(prefers-reduced-motion:reduce)').matches;
       ctx.globalCompositeOperation='lighter';
       [['#ff3d9a',0],['#3dd9ff',2.1],['#ffd23d',4.2]].forEach(([c,o])=>{const a=still?o:t*1.7+o,gx=LOG/2+Math.cos(a)*LOG*.32,gy=LOG/2+Math.sin(a*1.3)*LOG*.32,g=ctx.createRadialGradient(gx,gy,0,gx,gy,LOG*.38);g.addColorStop(0,c+'40');g.addColorStop(1,c+'00');ctx.fillStyle=g;ctx.fillRect(0,0,LOG,LOG)});
       ctx.globalCompositeOperation='source-over';
     }
+  }
+  if(Match.state==='Ready'&&A){
+    const k=clamp(A.readyT/CFG.match.readySeconds,0,1);
+    ctx.fillStyle='rgba(8,14,10,.55)';ctx.fillRect(0,0,LOG,LOG);
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=PAL.gold;ctx.font=`34px ${DISPLAY}`;ctx.fillText('Get ready',LOG/2,LOG/2-14);
+    ctx.fillStyle=PAL.ink;ctx.font=`15px ${BODY}`;ctx.fillText(`Raiding ${A.base.name}`,LOG/2,LOG/2+16);
+    ctx.fillStyle='rgba(255,255,255,.15)';rr(LOG/2-60,LOG/2+34,120,6,3);ctx.fill();ctx.fillStyle=PAL.gold;rr(LOG/2-60,LOG/2+34,120*(1-k),6,3);ctx.fill();
+    ctx.textBaseline='alphabetic';
   }
   ctx.textAlign='center';ctx.font=`14px ${DISPLAY}`;ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,.55)';
   for(const f of floats){const k=ease((1.4-f.t)/1.4),fy=(f.y-k*1.4)*TS;ctx.globalAlpha=Math.min(1,f.t*1.5);ctx.strokeText(f.text,f.x*TS,fy);ctx.fillStyle=f.color;ctx.fillText(f.text,f.x*TS,fy)}
@@ -1076,7 +1118,7 @@ function updateHud(){
   $('gemsV').textContent=fmt(disp.gems);$('repV').textContent=fmt(G.rep);
 }
 function updateRaidHud(){
-  if(!A||mode!=='attack')return;
+  if(!A||inMenus())return;
   $('rName').textContent=A.base.name;
   $('rSub').textContent=`${A.revenge?'Revenge · ':''}Level ${A.base.lvl} chapter`;
   const rg=$('ragerB');if(rg){rg.style.setProperty('--h',A.rager>0?100:A.hype);rg.querySelector('.c').textContent=A.rager>0?Math.ceil(A.rager)+'s':Math.floor(A.hype)+'%';const full=A.hype>=100&&A.rager<=0;if(rg.classList.contains('full')!==full)rg.classList.toggle('full',full)}
@@ -1324,7 +1366,7 @@ function renderLobby(){
   $('lobbyInfo').innerHTML=`
     <div class="card"><div class="opp"><div><b>${A.base.name}</b><span class="m">Level ${A.base.lvl} chapter${A.revenge?' · Revenge':''}</span>
       <span class="m">Loot up to <span style="color:var(--dues)">${fmt(A.base.loot.dues)} D</span> and <span style="color:var(--clout)">${fmt(A.base.loot.clout)} C</span></span></div>
-      <button class="btn ghost" id="nextOpp">Find another <span class="cost dues">25 D</span></button></div></div>
+      <button class="btn ghost" id="nextOpp">Find another <span class="cost dues">${CFG.match.findAnotherCost} D</span></button></div></div>
     <div class="card"><h3>Your loadout <button class="btn ghost" id="editLo" style="padding:7px 12px;font-size:14px">Edit</button></h3>
       <div class="lo">${slots}</div>
       <p>Army ${armyUsed()}/${armyCap()} · ${pr} prank${pr===1?'':'s'}${G.hypeStart?' · Hype Starter ready':''}</p></div>
@@ -1333,14 +1375,15 @@ function renderLobby(){
       <div class="player"><span><b>${A.base.name}</b> · Level ${A.base.lvl}</span><span class="tag">AI RIVAL</span></div></div>
       <p>Online multiplayer isn't available yet. Every match is against an AI-run rival chapter.</p></div>`;
   $('readyBtn').disabled=!ready;
-  $('nextOpp').onclick=()=>{if(G.dues<25){toast('You need 25 Dues to find another rival.');return}G.dues-=25;save();findOpponent();renderAll()};
+  const fc=CFG.match.findAnotherCost;
+  $('nextOpp').onclick=()=>{if(!inMenus())return;if(G.dues<fc){toast(`You need ${fc} Dues to find another rival.`);return}G.dues-=fc;save();findOpponent();renderAll()};
   $('editLo').onclick=()=>setPage('troops');
 }
 $('readyBtn').onclick=startMatch;
 
 /* ---------- match ---------- */
 function renderMatch(){
-  $('matchPanel').textContent=`${A.revenge?'Revenge on':'Raiding'} ${A.base.name}. Tap or hold open lawn to drop troops. Pranks land anywhere. Knock buildings down to build Hype, then throw a Rager.`;
+  $('matchPanel').textContent=Match.state==='Ready'?'Get ready. Pick a troop below, then drop it on the open lawn once the match starts.':`${A.revenge?'Revenge on':'Raiding'} ${A.base.name}. Tap or hold open lawn to drop troops. Pranks land anywhere. Knock buildings down to build Hype, then throw a Rager.`;
   renderBottom();
 }
 function renderBottom(){
@@ -1350,7 +1393,7 @@ function renderBottom(){
   const live=A.rager>0,full=!live&&A.hype>=100;
   bt.innerHTML=`<div class="troops"><button class="chip rager ${full?'full':''} ${live?'live':''}" id="ragerB" style="--h:${live?100:A.hype}"><span class="g">R</span><span class="n">Rager</span><span class="c">${live?Math.ceil(A.rager)+'s':Math.floor(A.hype)+'%'}</span></button>${chips||'<span style="color:var(--muted);padding:10px">No troops left.</span>'}<button class="chip" id="endB" style="border-color:#5a2a25"><span class="g" style="background:var(--danger);border-color:var(--danger-d)">✕</span><span class="n">End raid</span></button></div>`;
   bt.querySelectorAll('[data-k]').forEach(el=>el.onclick=()=>{A.sel=el.dataset.k;renderBottom()});
-  $('endB').onclick=endRaid;$('ragerB').onclick=throwRager;
+  $('endB').onclick=finishMatch;$('ragerB').onclick=throwRager;
 }
 
 /* placeholder ad for the base page; the brands are made up */
@@ -1366,7 +1409,7 @@ function showAd(){
   $('adHead').textContent=a.head;$('adBody').textContent=a.body;
   $('adCta').textContent=a.cta;$('adCta').style.background=a.col;
 }
-function syncAd(){$('ad').hidden=!adReady||adClosed||mode!=='home'||page!=='base'}
+function syncAd(){$('ad').hidden=!adReady||adClosed||!inMenus()||page!=='base'}
 $('adX').onclick=()=>{adClosed=true;clearInterval(adTimer);syncAd()};
 $('adCta').onclick=()=>toast('This ad is a placeholder.');
 setTimeout(()=>{adReady=true;showAd();syncAd();adTimer=setInterval(()=>{adI++;showAd()},12000)},1500);
@@ -1374,14 +1417,14 @@ setTimeout(()=>{adReady=true;showAd();syncAd();adTimer=setInterval(()=>{adI++;sh
 /* ---------- navigation ---------- */
 const PAGES=['base','shop','troops','lobby'];
 function setPage(p){
-  if(mode!=='home')return;
+  if(!inMenus())return;
   if(p!=='base'){ui.place=null;ui.move=false;ui.ghost=null}
   const changed=p!==page;page=p;renderAll();
   if(changed){const el=$('pg-'+p);el.classList.remove('enter');void el.offsetWidth;el.classList.add('enter')}
 }
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setPage(t.dataset.page));
 function renderAll(){
-  const match=mode==='attack';
+  const match=!inMenus();
   $('hud').hidden=match;$('ahud').hidden=!match;$('tabs').hidden=match;
   for(const p of[...PAGES,'match'])$('pg-'+p).hidden=match?p!=='match':p!==page;
   document.querySelectorAll('.tab').forEach(t=>t.dataset.page===page?t.setAttribute('aria-current','page'):t.removeAttribute('aria-current'));
@@ -1398,7 +1441,7 @@ function renderAll(){
 /* ---------- input ---------- */
 function tileAt(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*GRID,y:(e.clientY-r.top)/r.height*GRID}}
 let hold=null,holdPos=null;
-const onBase=()=>mode==='home'&&page==='base';
+const onBase=()=>inMenus()&&page==='base';
 cv.addEventListener('pointermove',e=>{
   const p=tileAt(e);holdPos=p;
   const gt=ui.place||(ui.move&&ui.sel&&ui.sel.type);
@@ -1406,7 +1449,7 @@ cv.addEventListener('pointermove',e=>{
 });
 cv.addEventListener('pointerdown',e=>{
   const p=tileAt(e);holdPos=p;
-  if(mode==='attack'){
+  if(Match.state==='InMatch'){
     deployAt(p.x,p.y);clearInterval(hold);
     if(A&&A.sel&&A.sel.startsWith('p:'))return;
     hold=setInterval(()=>{if(holdPos)deployAt(holdPos.x,holdPos.y)},140);
@@ -1432,7 +1475,7 @@ cv.addEventListener('pointerdown',e=>{
   if(hit){ui.bounce={b:hit,t:tick()};if(B[hit.type].gives&&stored(hit)>=1)collect(hit)}
   ui.sel=hit||null;renderAll();
 });
-const stopHold=()=>{clearInterval(hold);hold=null};
+function stopHold(){clearInterval(hold);hold=null}
 cv.addEventListener('pointerup',stopHold);cv.addEventListener('pointercancel',stopHold);cv.addEventListener('pointerleave',stopHold);
 
 /* ---------- sizing & loop ---------- */
@@ -1449,12 +1492,13 @@ window.addEventListener('resize',fit);
 let last=performance.now(),acc=0;
 function loop(t){
   const dt=Math.min(.05,(t-last)/1000);last=t;
-  if(mode==='attack'&&A&&!A.over)stepRaid(dt);
+  if(Match.state==='Ready')tickReady(dt);
+  else if(Match.state==='InMatch')stepRaid(dt);
   for(const f of floats)f.t-=dt*.9;floats=floats.filter(f=>f.t>0);
-  tweenHud(dt);if(mode==='home')updateHud();
+  tweenHud(dt);if(inMenus())updateHud();
   acc+=dt;
   if(acc>.5){acc=0;
-    if(mode==='home'){finishBuilds();
+    if(inMenus()){finishBuilds();
       document.querySelectorAll('[data-until]').forEach(el=>el.textContent=ftime((+el.dataset.until-now())/1000));
       const r=$('readyV');if(r&&ui.sel)r.textContent=fmt(stored(ui.sel));}
   }
