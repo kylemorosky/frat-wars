@@ -19,6 +19,8 @@ A match runs Lobby → Ready (a short countdown) → Match → Results (Victory 
 
 Each CPU match uses one of six base layouts (Ring Fort, West Wall, Corner Keep, Long Hall, Diagonal, Four Pods). Every layout comes up once before any repeats, and the same layout never comes up twice in a row. To add a layout, add an entry to `layouts.js`; the comment at the top of that file explains the format.
 
+The Lobby also has **Troop upgrades**. Each troop type has its own level from 1 to 10, and every troop of that type gets +10% health and damage per level. Level 2 costs 100 Dues, level 3 costs 200, and so on. Upgrades can only be bought in the Lobby. The costs, boost and max level are in `config.js`.
+
 Resources:
 
 - **Chapter House** is your headquarters. Its level caps how far every other building can go.

@@ -8,6 +8,14 @@ window.GR_CONFIG={
     findAnotherCost:25,  // Dues to swap the lobby opponent for a new one
     gemsPerStar:2,       // Gems awarded per star on the results screen
   },
+  upgrades:{
+    // Each troop type has its own level, bought in the Lobby. Every troop of that type gets the boost.
+    // Cost to reach level n = costPerLevel x (n - 1): level 2 costs 100, level 3 costs 200, and so on.
+    maxLevel:10,
+    costPerLevel:100,
+    boostPerLevel:0.10,  // +10% health and +10% damage per level above 1
+    currency:'dues',     // which balance pays for upgrades: 'dues', 'clout' or 'gems'
+  },
   layouts:{
     maxHedges:36,        // most hedges any rival builds; every layout needs at least this many hedge slots
     minDeployTiles:30,   // open lawn tiles (outside the red no-drop zone) a fully built layout must leave

@@ -180,6 +180,12 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
 .who b{font-family:var(--display);font-weight:400;font-size:22px;line-height:1.1}
 .who span{color:var(--muted);font-size:13px}
 
+.uprow{display:grid;grid-template-columns:40px 1fr auto;gap:10px;align-items:center;padding:7px 10px;border-radius:10px;background:var(--panel2)}
+.uprow img{width:40px;height:40px;border-radius:50%;background:#22352a}
+.uprow b{font-family:var(--display);font-weight:400;font-size:15px}
+.uprow span{display:block;color:var(--muted);font-size:13px}
+.uprow .btn{padding:8px 10px;font-size:14px;white-space:nowrap}
+
 /* match */
 #matchPanel{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;color:var(--muted);font-size:14px;line-height:1.3}
 .troops{display:flex;gap:8px;overflow-x:auto;flex:none;padding:4px 0 2px}
@@ -371,6 +377,7 @@ function load(){
   delete s.map;
   if(typeof s.gems!=='number')s.gems=40;
   if(!Array.isArray(s.layoutBag))s.layoutBag=[];
+  if(!s.troopLevels||typeof s.troopLevels!=='object')s.troopLevels={};
   s.loadout=(Array.isArray(s.loadout)?s.loadout:DEFAULT_LOADOUT).filter(k=>T[k]).slice(0,LOADOUT_MAX);
   return s;
 }
@@ -548,6 +555,22 @@ function forbidGrid(bs){
   for(const b of bs){const s=B[b.type].size;for(let y=b.y-1;y<=b.y+s;y++)for(let x=b.x-1;x<=b.x+s;x++)if(x>=0&&y>=0&&x<GRID&&y<GRID)g[y][x]=true}
   return g;
 }
+/* ---------- troop upgrades ----------
+   One level per troop type, tuned in config.js. Base stats in T never change; the boost is applied
+   to each troop as it spawns. Purchases only go through in the Lobby state on the Lobby page. */
+const UP=CFG.upgrades;
+const troopLevel=k=>clamp(G.troopLevels[k]||1,1,UP.maxLevel);
+const troopBoost=k=>1+(troopLevel(k)-1)*UP.boostPerLevel;
+const upgradeCost=k=>troopLevel(k)>=UP.maxLevel?null:UP.costPerLevel*troopLevel(k);   // costPerLevel x (target level - 1)
+const boostLabel=k=>`+${Math.round((troopBoost(k)-1)*100)}% health and damage`;
+// Checks everything first, then takes the payment and raises the level together. Returns whether it went through.
+function buyTroopUpgrade(k){
+  if(!inMenus()||page!=='lobby'||!T[k]||CL()<T[k].unlock)return false;
+  const cost=upgradeCost(k);
+  if(cost==null||G[UP.currency]<cost)return false;
+  G[UP.currency]-=cost;G.troopLevels[k]=troopLevel(k)+1;save();
+  return true;
+}
 const inLoadout=()=>G.loadout.filter(k=>CL()>=T[k].unlock);
 function nextSel(){const t=inLoadout().find(k=>(G.army[k]||0)>0);if(t)return t;const p=Object.keys(P).find(k=>(G.pranks[k]||0)>0);return p?'p:'+p:null}
 function findOpponent(rev){
@@ -636,8 +659,8 @@ function deployAt(x,y){
   const tx=Math.floor(x),ty=Math.floor(y);
   if(tx<0||ty<0||tx>=GRID||ty>=GRID)return;
   if(A.forbid[ty][tx]){if(!A.warned||now()-A.warned>1500){A.warned=now();toast('Too close to their buildings. Drop troops in the open lawn.')}return}
-  const t=T[k];
-  A.units.push({k,x,y,hp:t.hp,max:t.hp,cd:.4,stun:0,tgt:null,wall:null,seed:Math.random(),dir:0,born:tick()});
+  const t=T[k],boost=troopBoost(k);
+  A.units.push({k,x,y,hp:t.hp*boost,max:t.hp*boost,boost,cd:.4,stun:0,tgt:null,wall:null,seed:Math.random(),dir:0,born:tick()});
   A.fx.push({type:'ring',x,y,r:.55,t:.3,max:.3,color:'#fff3c4'});
   G.army[k]--;A.deployed++;
   if(G.army[k]<=0)A.sel=nextSel();
@@ -655,7 +678,7 @@ function stepRaid(dt){
     const t=T[u.k];
     u.moving=false;
     u.buff=!!t.pledge&&pcps.some(p=>Math.hypot(p.x-u.x,p.y-u.y)<AURA);
-    const bm=u.buff?1.5:1;
+    const bm=(u.buff?1.5:1)*u.boost;
     if(u.stun>0){u.stun-=dt;continue}
     u.cd-=dt;
     if(u.wall&&!u.wall.alive)u.wall=null;
@@ -1361,8 +1384,8 @@ function renderTroops(){
   const rows=Object.keys(T).map(k=>{
     const t=T[k],locked=CL()<t.unlock,sel=!locked&&lo.includes(k);
     return`<div class="trow ${sel?'sel':''} ${locked?'locked':''}"><img src="${troopIcon(k)}" alt="">
-      <div><h3>${t.name}<small>×${G.army[k]||0}${t.max?'/'+t.max:''}</small></h3><p>${t.desc}</p>
-        <div class="tstats"><span>Health <b>${t.hp}</b></span><span>Damage <b>${t.dmg}</b></span><span>Cost <b>${t.cost} C</b></span><span>Speed <b>${t.spd}</b></span><span>Range <b>${t.range<1?'Melee':t.range}</b></span><span>Space <b>${t.house}</b></span></div></div>
+      <div><h3>${t.name}<small>×${G.army[k]||0}${t.max?'/'+t.max:''} · Lv ${troopLevel(k)}</small></h3><p>${t.desc}</p>
+        <div class="tstats"><span>Health <b>${Math.round(t.hp*troopBoost(k))}</b></span><span>Damage <b>${Math.round(t.dmg*troopBoost(k))}</b></span><span>Cost <b>${t.cost} C</b></span><span>Speed <b>${t.spd}</b></span><span>Range <b>${t.range<1?'Melee':t.range}</b></span><span>Space <b>${t.house}</b></span></div></div>
       <div class="tact">${locked?`<div class="lockreq">Unlocks at<br>Chapter LV ${t.unlock}</div>`
         :`<button class="btn ${sel?'':'ghost'}" data-pick="${k}" aria-pressed="${sel}">${sel?'✓ Bringing':'Bring'}</button>${costBtn('+1','clout',t.cost,'r_'+k,'ghost')}`}</div></div>`}).join('');
   const cl=closet();
@@ -1411,6 +1434,11 @@ function renderLobby(){
     <div class="card"><h3>Your loadout <button class="btn ghost" id="editLo" style="padding:7px 12px;font-size:14px">Edit</button></h3>
       <div class="lo">${slots}</div>
       <p>Army ${armyUsed()}/${armyCap()} · ${pr} prank${pr===1?'':'s'}${G.hypeStart?' · Hype Starter ready':''}</p></div>
+    <div class="card"><h3>Troop upgrades <span style="font-family:var(--body);font-size:13px;color:var(--muted)">${fmt(G[UP.currency])} ${resName(UP.currency)}</span></h3>
+      <div class="players">${Object.keys(T).filter(k=>CL()>=T[k].unlock).map(k=>{const c=upgradeCost(k),can=c!=null&&G[UP.currency]>=c;
+        return`<div class="uprow"><img src="${troopIcon(k)}" alt=""><div><b>${T[k].name} · Level ${troopLevel(k)}</b><span>${troopLevel(k)>1?boostLabel(k):'No boost yet'}${c==null?'':` · next level costs ${fmt(c)} ${resName(UP.currency)}`}</span></div>
+          ${c==null?'<button class="btn ghost" disabled>Max level</button>':`<button class="btn ${can?'':'ghost'}" data-up="${k}" ${can?'':'disabled'}>Upgrade <span class="cost ${UP.currency}">${fmt(c)} ${UP.currency==='dues'?'D':UP.currency==='clout'?'C':'G'}</span></button>`}</div>`}).join('')}</div>
+      <p>Each level adds ${Math.round(UP.boostPerLevel*100)}% health and damage to every troop of that type. Max level ${UP.maxLevel}.</p></div>
     <div class="card"><h3>Players</h3><div class="players">
       <div class="player"><span><b>${PLAYER_NAME}</b> · You</span><span class="tag ${ready?'ok':''}">${ready?'READY TO GO':'NO TROOPS'}</span></div>
       <div class="player"><span><b>${A.base.name}</b> · Level ${A.base.lvl}</span><span class="tag">AI RIVAL</span></div></div>
@@ -1419,6 +1447,10 @@ function renderLobby(){
   const fc=CFG.match.findAnotherCost;
   $('nextOpp').onclick=()=>{if(!inMenus())return;if(G.dues<fc){toast(`You need ${fc} Dues to find another rival.`);return}G.dues-=fc;save();findOpponent();renderAll()};
   $('editLo').onclick=()=>setPage('troops');
+  $('lobbyInfo').querySelectorAll('[data-up]').forEach(el=>el.onclick=()=>{
+    const k=el.dataset.up,to=troopLevel(k)+1;
+    if(buyTroopUpgrade(k)){toast(`${T[k].name} upgraded to level ${to}.`);renderLobby()}
+  });
 }
 $('readyBtn').onclick=startMatch;
 
