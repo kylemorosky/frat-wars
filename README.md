@@ -4,7 +4,7 @@ A frat-row base builder in the spirit of Clash of Clans. Grow your chapter, stoc
 
 ## Play
 
-Open `index.html` in a browser. There's no build step. `index.html` holds the game, and `config.js` holds the numbers you can tune; keep them in the same folder. Progress saves in your browser's local storage.
+Open `index.html` in a browser. There's no build step. `index.html` holds the game, `config.js` holds the numbers you can tune, and `layouts.js` holds the CPU base layouts; keep all three in the same folder. Progress saves in your browser's local storage.
 
 ## How it plays
 
@@ -16,6 +16,8 @@ The tab bar at the bottom switches between four pages any time you're not in a m
 - **Lobby:** your player name, your loadout and the rival you'll face. Hit **Ready** to start the match.
 
 A match runs Lobby → Ready (a short countdown) → Match → Results (Victory or Defeat, with time, troops sent, troops lost and rewards) → **Return to lobby**. You can play as many CPU matches in a row as you like.
+
+Each CPU match uses one of six base layouts (Ring Fort, West Wall, Corner Keep, Long Hall, Diagonal, Four Pods). Every layout comes up once before any repeats, and the same layout never comes up twice in a row. To add a layout, add an entry to `layouts.js`; the comment at the top of that file explains the format.
 
 Resources:
 

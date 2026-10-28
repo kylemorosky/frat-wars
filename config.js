@@ -8,4 +8,8 @@ window.GR_CONFIG={
     findAnotherCost:25,  // Dues to swap the lobby opponent for a new one
     gemsPerStar:2,       // Gems awarded per star on the results screen
   },
+  layouts:{
+    maxHedges:36,        // most hedges any rival builds; every layout needs at least this many hedge slots
+    minDeployTiles:30,   // open lawn tiles (outside the red no-drop zone) a fully built layout must leave
+  },
 };

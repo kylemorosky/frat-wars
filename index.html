@@ -303,6 +303,7 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
 <div id="toast" hidden></div>
 
 <script src="config.js"></script>
+<script src="layouts.js"></script>
 <script>
 (()=>{
 const $=id=>document.getElementById(id);
@@ -369,6 +370,7 @@ function load(){
   s.pranks=s.pranks||{};s.log=s.log||[];s.seen=s.seen||now();
   delete s.map;
   if(typeof s.gems!=='number')s.gems=40;
+  if(!Array.isArray(s.layoutBag))s.layoutBag=[];
   s.loadout=(Array.isArray(s.loadout)?s.loadout:DEFAULT_LOADOUT).filter(k=>T[k]).slice(0,LOADOUT_MAX);
   return s;
 }
@@ -480,31 +482,66 @@ let A=null;                 // the lobby's opponent, and the match state once Re
 let floats=[];
 const cv=$('board');let ctx=cv.getContext('2d');let scale=1;
 
-/* ---------- rival bases ---------- */
-function rivalBase(force){
+/* ---------- rival bases ----------
+   Layouts are data in layouts.js. Each one is parsed into slots per building type, sorted so the
+   slots nearest the Chapter House come first. A level-L rival fills the first rivalCount(type,L) slots,
+   so every layout has the same buildings at a given level and only the arrangement differs.
+   Buildings don't block movement and hedges can be broken (Gargoyles fly over them), so a layout is
+   reachable as long as there is open lawn to drop troops on; validation checks that room. */
+const LAYOUT_LETTERS={C:'chapter',B:'balloon',N:'nerf',S:'speaker',D:'duesbox',L:'cloutbooth',A:'annex',K:'closet',T:'tent',h:'hedge'};
+const BUILD_ORDER=['chapter','balloon','nerf','speaker','duesbox','cloutbooth','annex','closet','tent','hedge'];
+const rivalCount=(type,L)=>type==='chapter'||type==='tent'?1:type==='hedge'?Math.min(CFG.layouts.maxHedges,B.hedge.max[L-1]+(L>=3?6:0)):B[type].max[L-1];
+function layoutPlan(slots,L){const out=[];for(const t of BUILD_ORDER)for(const p of(slots[t]||[]).slice(0,rivalCount(t,L)))out.push({type:t,x:p.x,y:p.y});return out}
+function parseLayout(def){
+  const errs=[],grid=def.grid,slots={};
+  if(!Array.isArray(grid)||grid.length!==GRID||grid.some(r=>typeof r!=='string'||r.length!==GRID))return{errs:[`grid must be ${GRID} rows of ${GRID} characters`],slots};
+  const taken=[...Array(GRID)].map(()=>Array(GRID).fill(false));
+  for(let y=0;y<GRID;y++)for(let x=0;x<GRID;x++){
+    const ch=grid[y][x];if(ch==='.'||taken[y][x])continue;
+    const type=LAYOUT_LETTERS[ch];
+    if(!type){errs.push(`unknown letter "${ch}" at ${x},${y}`);continue}
+    const s=B[type].size;let ok=x+s<=GRID&&y+s<=GRID;
+    for(let yy=y;ok&&yy<y+s;yy++)for(let xx=x;xx<x+s;xx++)if(grid[yy][xx]!==ch||taken[yy][xx])ok=false;
+    if(!ok){errs.push(`${B[type].name} at ${x},${y} is not a clean ${s}x${s} square`);for(let yy=y;yy<Math.min(GRID,y+s);yy++)for(let xx=x;xx<Math.min(GRID,x+s);xx++)if(grid[yy][xx]===ch)taken[yy][xx]=true;continue}
+    for(let yy=y;yy<y+s;yy++)for(let xx=x;xx<x+s;xx++)taken[yy][xx]=true;
+    (slots[type]=slots[type]||[]).push({x,y});
+  }
+  const chs=slots.chapter||[];
+  if(chs.length!==1){errs.push(`needs exactly one Chapter House, found ${chs.length}`);return{errs,slots}}
+  const cx=chs[0].x+B.chapter.size/2,cy=chs[0].y+B.chapter.size/2;
+  for(const t in slots){const h=B[t].size/2;slots[t].sort((a,b)=>Math.hypot(a.x+h-cx,a.y+h-cy)-Math.hypot(b.x+h-cx,b.y+h-cy)||a.y-b.y||a.x-b.x)}
+  for(const t of BUILD_ORDER){const need=rivalCount(t,5),have=(slots[t]||[]).length;if(have<need)errs.push(`needs ${need} ${B[t].name} slot${need>1?'s':''}, has ${have}`)}
+  if(!errs.length){
+    const open=forbidGrid(layoutPlan(slots,5)).flat().filter(f=>!f).length;
+    if(open<CFG.layouts.minDeployTiles)errs.push(`leaves ${open} open tiles to drop troops when fully built, needs ${CFG.layouts.minDeployTiles}`);
+  }
+  return{errs,slots};
+}
+const LAYOUT_LIST=(window.GR_LAYOUTS||[]).flatMap(def=>{
+  const{errs,slots}=parseLayout(def);
+  if(errs.length){console.error(`Layout "${def.id}" left out of the rotation:\n  `+errs.join('\n  '));return[]}
+  return[{id:def.id,name:def.name,slots}];
+});
+if(!LAYOUT_LIST.length)throw new Error('No valid CPU base layouts. Check layouts.js and the console errors above.');
+// Shuffled bag: every layout comes up once before any repeats. `avoid` holds ids that must not come
+// next (the layout just played, and one being skipped), unless nothing else is left.
+function pickLayout(avoid=[]){
+  const ids=LAYOUT_LIST.map(l=>l.id);
+  G.layoutBag=G.layoutBag.filter(id=>ids.includes(id));
+  if(!G.layoutBag.length){G.layoutBag=[...ids];for(let i=G.layoutBag.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[G.layoutBag[i],G.layoutBag[j]]=[G.layoutBag[j],G.layoutBag[i]]}}
+  let i=G.layoutBag.findIndex(id=>!avoid.includes(id));
+  if(i<0)i=G.layoutBag.findIndex(id=>id!==G.lastLayout);
+  if(i<0)i=0;
+  const id=G.layoutBag.splice(i,1)[0];save();
+  return LAYOUT_LIST.find(l=>l.id===id);
+}
+function rivalBase(force,layout){
   const cl=CL(),L=force?force.lvl:clamp(cl+(Math.random()<.3?1:0)-(Math.random()<.25?1:0),1,5);
   const name=force?force.name:randName();
-  const bs=[];
-  const add=(type,x,y,l)=>{const hp=B[type].hp[l-1];bs.push({type,x,y,lvl:l,hp,max:hp,cd:Math.random()*1.5,alive:true,aim:Math.random()*6.28})};
   const lv=()=>clamp(L-(Math.random()<.4?1:0),1,5);
-  add('chapter',7,7,L);
-  const put=(type,inner)=>{
-    const s=B[type].size;
-    for(let i=0;i<400;i++){
-      let x,y;
-      if(inner){x=5+(Math.random()*(9-s)|0);y=5+(Math.random()*(9-s)|0)}
-      else{x=Math.random()*(GRID-s+1)|0;y=Math.random()*(GRID-s+1)|0;if(!(x+s<=4||x>=14||y+s<=4||y>=14))continue}
-      if(fits(x,y,s,bs)){add(type,x,y,lv());return}
-    }
-  };
-  for(const t of['balloon','nerf','speaker'])for(let i=0;i<B[t].max[L-1];i++)put(t,true);
-  for(const t of['duesbox','cloutbooth','annex','closet'])for(let i=0;i<B[t].max[L-1];i++)put(t,false);
-  put('tent',false);
-  const per=[];for(let i=4;i<=13;i++)per.push([i,4]);for(let i=5;i<=13;i++)per.push([13,i]);for(let i=12;i>=4;i--)per.push([i,13]);for(let i=12;i>=5;i--)per.push([4,i]);
-  const n=Math.min(per.length,B.hedge.max[L-1]+(L>=3?6:0)),off=Math.random()*per.length|0;
-  for(let i=0;i<n;i++){const[x,y]=per[(off+i)%per.length];if(fits(x,y,1,bs))add('hedge',x,y,lv())}
+  const bs=layoutPlan(layout.slots,L).map(({type,x,y})=>{const l=type==='chapter'?L:lv(),hp=B[type].hp[l-1];return{type,x,y,lvl:l,hp,max:hp,cd:Math.random()*1.5,alive:true,aim:Math.random()*6.28}});
   const k=.8+Math.random()*.4,bonus=force?force.lost:{dues:0,clout:0};
-  return{name,lvl:L,buildings:bs,loot:{dues:Math.round((250+L*L*230)*k)+bonus.dues,clout:Math.round((250+L*L*230)*(1.6-k))+bonus.clout}};
+  return{name,lvl:L,layout:layout.id,layoutName:layout.name,buildings:bs,loot:{dues:Math.round((250+L*L*230)*k)+bonus.dues,clout:Math.round((250+L*L*230)*(1.6-k))+bonus.clout}};
 }
 function forbidGrid(bs){
   const g=[...Array(GRID)].map(()=>Array(GRID).fill(false));
@@ -514,7 +551,10 @@ function forbidGrid(bs){
 const inLoadout=()=>G.loadout.filter(k=>CL()>=T[k].unlock);
 function nextSel(){const t=inLoadout().find(k=>(G.army[k]||0)>0);if(t)return t;const p=Object.keys(P).find(k=>(G.pranks[k]||0)>0);return p?'p:'+p:null}
 function findOpponent(rev){
-  const base=rivalBase(rev);
+  // a lobby opponent that is being replaced was never played, so its layout goes back in the bag
+  const skipped=A&&inMenus()?A.base.layout:null;
+  if(skipped)G.layoutBag.push(skipped);
+  const base=rivalBase(rev,pickLayout([G.lastLayout,skipped]));
   A={base,bs:base.buildings,units:[],projs:[],fx:[],zones:[],t:CFG.match.duration,sel:null,deployed:0,lost:0,pct:0,stars:0,chapterDown:false,hype:0,rager:0,
     revenge:rev||null,forbid:forbidGrid(base.buildings),readyT:0,endIn:null,result:null};
 }
@@ -525,6 +565,7 @@ function startMatch(){
   if(!Match.go('Ready'))return;
   if(!A)findOpponent();
   A.sel=nextSel();A.readyT=CFG.match.readySeconds;
+  G.lastLayout=A.base.layout;save();
   if(G.hypeStart){A.hype=50;G.hypeStart=false;save()}
   ui={sel:null,place:null,move:false,ghost:null};renderAll();
 }
@@ -1120,7 +1161,7 @@ function updateHud(){
 function updateRaidHud(){
   if(!A||inMenus())return;
   $('rName').textContent=A.base.name;
-  $('rSub').textContent=`${A.revenge?'Revenge · ':''}Level ${A.base.lvl} chapter`;
+  $('rSub').textContent=`${A.revenge?'Revenge · ':''}Level ${A.base.lvl} · ${A.base.layoutName}`;
   const rg=$('ragerB');if(rg){rg.style.setProperty('--h',A.rager>0?100:A.hype);rg.querySelector('.c').textContent=A.rager>0?Math.ceil(A.rager)+'s':Math.floor(A.hype)+'%';const full=A.hype>=100&&A.rager<=0;if(rg.classList.contains('full')!==full)rg.classList.toggle('full',full)}
   const s=Math.ceil(A.t);$('rTime').textContent=`${s/60|0}:${String(s%60).padStart(2,'0')}`;
   $('rStars').innerHTML=[0,1,2].map(i=>i<A.stars?'★':'<span class="off">★</span>').join('');
@@ -1364,7 +1405,7 @@ function renderLobby(){
   const slots=lo.map(k=>`<div class="slot ${(G.army[k]||0)?'':'empty'}"><img src="${troopIcon(k)}" alt=""><b>×${G.army[k]||0}</b>${T[k].name.split(' ')[0]}</div>`).join('')
     +Array(LOADOUT_MAX-lo.length).fill('<div class="slot empty"><img alt="" style="border-style:dashed"><b>–</b>Empty</div>').join('');
   $('lobbyInfo').innerHTML=`
-    <div class="card"><div class="opp"><div><b>${A.base.name}</b><span class="m">Level ${A.base.lvl} chapter${A.revenge?' · Revenge':''}</span>
+    <div class="card"><div class="opp"><div><b>${A.base.name}</b><span class="m">Level ${A.base.lvl} chapter · ${A.base.layoutName}${A.revenge?' · Revenge':''}</span>
       <span class="m">Loot up to <span style="color:var(--dues)">${fmt(A.base.loot.dues)} D</span> and <span style="color:var(--clout)">${fmt(A.base.loot.clout)} C</span></span></div>
       <button class="btn ghost" id="nextOpp">Find another <span class="cost dues">${CFG.match.findAnotherCost} D</span></button></div></div>
     <div class="card"><h3>Your loadout <button class="btn ghost" id="editLo" style="padding:7px 12px;font-size:14px">Edit</button></h3>
