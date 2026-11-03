@@ -502,6 +502,30 @@ const SOUNDS={
   chest:{run:s=>{s.noise(.3,{vol:.3,freq:2200});[659,880,1109,1319,1760].forEach((f,i)=>s.tone(f,.2,{type:'triangle',vol:.14,at:.05+i*.07}))}},
   level:{run:s=>{[523,784,1047,1568].forEach((f,i)=>s.tone(f,.3,{type:'square',vol:.07,at:i*.09}))}},
 };
+// Background music: a soft four-chord loop scheduled a little ahead of time on the same audio context.
+const Music={
+  timer:null,next:0,step:0,gain:null,
+  chords:[[48,55,64,67],[43,50,59,67],[45,52,60,64],[41,48,57,65]],   // C  G  Am  F (MIDI notes)
+  hz:m=>440*Math.pow(2,(m-69)/12),
+  start(){
+    if(this.timer||G.music===false||!Sfx.ac)return;
+    this.gain=Sfx.ac.createGain();this.gain.gain.value=.22;this.gain.connect(Sfx.out);
+    this.next=Sfx.ac.currentTime+.1;this.timer=setInterval(()=>this.tick(),120);
+  },
+  stop(){clearInterval(this.timer);this.timer=null;if(this.gain){this.gain.disconnect();this.gain=null}},
+  note(f,t,d,type,vol){const a=Sfx.ac,o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.value=f;g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g);g.connect(this.gain);o.start(t);o.stop(t+d+.05)},
+  tick(){
+    const a=Sfx.ac,beat=60/96/2;if(!a||a.state!=='running')return;
+    while(this.next<a.currentTime+.4){
+      const bar=Math.floor(this.step/8)%4,i=this.step%8,ch=this.chords[bar],t=this.next;
+      if(i===0||i===4)this.note(this.hz(ch[0]-12),t,beat*3.6,'triangle',.5);
+      this.note(this.hz(ch[[1,2,3,2,1,2,3,2][i]]+12),t,beat*1.6,'sine',.16);
+      if(i===6&&bar%2)this.note(this.hz(ch[3]+24),t,beat*1.2,'sine',.08);
+      this.next+=beat;this.step++;
+    }
+  },
+};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)Music.stop();else if(Sfx.ac)Music.start()});
 addEventListener('pointerdown',()=>Sfx.start(),{capture:true});
 // a click on any game button gets a soft tap sound
 addEventListener('click',e=>{if(e.target.closest('.btn,.tab,.chip,.gift,.mbtn'))Sfx.play('tap')},{capture:true});
@@ -1046,6 +1070,34 @@ function heart(x,y,s,c){ctx.beginPath();ctx.moveTo(x,y+s*.9);ctx.bezierCurveTo(x
 function box(x,y,w,h,wall,top,col){rr(x,y+h-wall-2,w,wall+2,3);ctx.fillStyle=shade(col,-.4);ctx.fill();rr(x,y,w,h-wall,3);ctx.fillStyle=top||col;ctx.fill()}
 const tick=()=>performance.now()/1000;
 
+/* ---------- ambient life: students wandering the lawn at home ---------- */
+const SHIRTS=['#4aa8ff','#e85aa0','#ffc83d','#4fd18b','#b48cff','#ff8a5c'];
+const walkers=[...Array(5)].map((_,i)=>({x:2+i*3,y:16.5,tx:2+i*3,ty:16.5,wait:Math.random()*2,seed:(i*.37+.11)%1,shirt:SHIRTS[i],dir:0,moving:false}));
+function openTile(){for(let n=0;n<30;n++){const x=Math.random()*GRID|0,y=Math.random()*GRID|0;if(fits(x,y,1,G.buildings))return{x:x+.5,y:y+.6}}return null}
+function stepWalkers(dt){
+  for(const w of walkers){
+    const dx=w.tx-w.x,dy=w.ty-w.y,d=Math.hypot(dx,dy);
+    if(d<.05){w.moving=false;if((w.wait-=dt)<=0){const t=openTile();if(t){w.tx=t.x;w.ty=t.y}w.wait=1.5+Math.random()*3}continue}
+    const sp=Math.min(d,.9*dt);w.x+=dx/d*sp;w.y+=dy/d*sp;w.dir=Math.atan2(dy,dx);w.moving=true;
+  }
+}
+function drawWalker(w){
+  const x=w.x*TS,y=w.y*TS,s=TS*.3,tm=tick(),bob=w.moving?Math.abs(Math.sin(tm*10+w.seed*20))*s*.15:0;
+  ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.ellipse(x,y+s*.95,s*.8,s*.28,0,0,7);ctx.fill();
+  ctx.save();ctx.translate(x,y-bob);if(Math.cos(w.dir)<0)ctx.scale(-1,1);person(s,w,tm,w.moving,{shirt:w.shirt});ctx.restore();
+}
+
+/* ---------- day and night: follows the device clock ---------- */
+function nightAmount(){const h=new Date().getHours()+new Date().getMinutes()/60;return h>=20||h<5?1:h>=18?(h-18)/2:h<7?(7-h)/2:0}
+function drawNight(bs){
+  const n=nightAmount();if(n<=0)return;
+  ctx.save();ctx.globalCompositeOperation='multiply';ctx.fillStyle=`rgba(70,90,160,${.55*n})`;ctx.fillRect(0,0,LOG,LOG);
+  ctx.globalCompositeOperation='lighter';
+  for(const b of bs){if(b.alive===false||b.type==='hedge'||b.lvl<1)continue;const c=center(b),r=B[b.type].size*TS*.8,g=ctx.createRadialGradient(c.x*TS,c.y*TS,0,c.x*TS,c.y*TS,r);
+    g.addColorStop(0,`rgba(255,190,90,${.22*n})`);g.addColorStop(1,'rgba(255,190,90,0)');ctx.fillStyle=g;ctx.fillRect(c.x*TS-r,c.y*TS-r,r*2,r*2)}
+  ctx.restore();
+}
+
 /* ---------- juice: screen shake, debris, flying coins, confetti ---------- */
 const still=()=>matchMedia('(prefers-reduced-motion:reduce)').matches;
 let shakeAmp=0;
@@ -1430,8 +1482,9 @@ function draw(){
   drawLawn();
   if(!showingRival()){
     if(ui.sel){const d=B[ui.sel.type];if(d.def&&ui.sel.lvl>0){const c=center(ui.sel);ctx.fillStyle='rgba(255,200,61,.08)';ctx.strokeStyle='rgba(255,200,61,.6)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(c.x*TS,c.y*TS,d.range*TS,0,7);ctx.fill();ctx.stroke()}}
-    const items=[...G.buildings.map(b=>({z:b.y+B[b.type].size,b})),...visibleDecor(G.buildings).map(d=>({z:d.y,d}))].sort((a,c)=>a.z-c.z);
-    for(const{b,d}of items){
+    const items=[...G.buildings.map(b=>({z:b.y+B[b.type].size,b})),...visibleDecor(G.buildings).map(d=>({z:d.y,d})),...walkers.map(w=>({z:w.y+.3,w}))].sort((a,c)=>a.z-c.z);
+    for(const{b,d,w}of items){
+      if(w){drawWalker(w);continue}
       if(d){drawDecor(d);continue}
       if(ui.move&&b===ui.sel){ctx.globalAlpha=.35;drawBuilding(b,{home:true});ctx.globalAlpha=1;continue}
       drawBuilding(b,{home:true,bounce:ui.bounce&&ui.bounce.b===b?tick()-ui.bounce.t:null});
@@ -1466,6 +1519,7 @@ function draw(){
       ctx.globalCompositeOperation='source-over';
     }
   }
+  drawNight(showingRival()?A.bs:G.buildings);
   if(Match.state==='Ready'&&A){
     const k=clamp(A.readyT/CFG.match.readySeconds,0,1);
     ctx.fillStyle='rgba(8,14,10,.55)';ctx.fillRect(0,0,LOG,LOG);
@@ -1856,13 +1910,14 @@ setTimeout(()=>{adReady=true;showAd();syncAd();adTimer=setInterval(()=>{adI++;sh
 /* ---------- splash and settings ---------- */
 function hideSplash(){
   const sp=$('splash');if(!sp||sp.classList.contains('out'))return;
-  Sfx.start();Sfx.play('level');sp.classList.add('out');
+  Sfx.start();Sfx.play('level');Music.start();sp.classList.add('out');
   setTimeout(()=>{sp.remove();afterSplash()},still()?0:350);
 }
 $('playBtn').onclick=hideSplash;
 function openSettings(){
   openSheet(`<div class="head"><h3>Settings</h3><button class="btn ghost" id="closeS">Close</button></div>
     <div class="toggle"><span>Sound effects</span><button class="switch" id="sndSw" role="switch" aria-checked="${G.sound!==false}" aria-label="Sound effects"></button></div>
+    <div class="toggle"><span>Music</span><button class="switch" id="musSw" role="switch" aria-checked="${G.music!==false}" aria-label="Music"></button></div>
     <div class="sect">How to play</div>
     <p>Build and upgrade on your <b>Base</b>. Recruit and upgrade troops on the <b>Troops</b> and <b>Lobby</b> pages. Press <b>Ready</b> to raid a rival chapter: drop troops on open lawn, knock down 50% for a star and the Chapter House for another. Wins earn trophies, chests and Gems.</p>
     <div class="sect">Install on iPhone</div>
@@ -1871,6 +1926,7 @@ function openSettings(){
     <button class="btn red" id="resetBtn">Reset all progress</button>
     <p style="font-size:12px">Frat Wars v1.0 · Player ${PLAYER_NAME}</p>`);
   $('closeS').onclick=closeSheet;
+  $('musSw').onclick=e=>{G.music=G.music===false;e.currentTarget.setAttribute('aria-checked',G.music!==false);save();if(G.music===false)Music.stop();else{Sfx.start();Music.start()}};
   $('sndSw').onclick=e=>{G.sound=G.sound===false;e.currentTarget.setAttribute('aria-checked',G.sound!==false);save();Sfx.play('tap')};
   $('resetBtn').onclick=e=>{
     const b=e.currentTarget;if(b.dataset.sure){try{localStorage.removeItem(KEY)}catch(_){}location.reload();return}
@@ -1960,7 +2016,7 @@ function loop(t){
   if(Match.state==='Ready')tickReady(dt);
   else if(Match.state==='InMatch')stepRaid(dt);
   for(const f of floats)f.t-=dt*.9;floats=floats.filter(f=>f.t>0);
-  tweenHud(dt);if(inMenus())updateHud();
+  tweenHud(dt);if(inMenus()){updateHud();if(page==='base')stepWalkers(dt)}
   acc+=dt;
   if(acc>.5){acc=0;
     if(inMenus()){finishBuilds();
