@@ -242,6 +242,11 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
 .quest b{font-size:15px} .quest span{font-size:13px;color:var(--muted)}
 .qbar{margin:5px 0 3px} .qbar span{background:var(--gold)}
 
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;flex:none}
+.seg button{border:0;border-radius:9px;padding:9px 4px;background:transparent;color:var(--muted);font-family:var(--display);font-size:15px;cursor:pointer}
+.seg button[aria-selected=true]{background:linear-gradient(#2f4637,#233629);color:var(--gold);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.chip.dim{opacity:.45}
+
 /* match */
 #matchPanel{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;color:var(--muted);font-size:14px;line-height:1.3}
 .troops{display:flex;gap:8px;overflow-x:auto;flex:none;padding:4px 0 2px}
@@ -780,6 +785,7 @@ function findOpponent(rev){
 // Lobby -> Ready: the Ready button. A second press while Ready is already running is refused by Match.go.
 function startMatch(){
   if(!inMenus())return;
+  if(lobbyMode==='defend')return startSiege();
   if(!inLoadout().some(k=>(G.army[k]||0)>0)){toast('None of your selected troops are recruited. Pick or recruit some on the Troops page.');return}
   if(!Match.go('Ready'))return;
   if(!A)findOpponent();
@@ -788,6 +794,62 @@ function startMatch(){
   if(G.hypeStart){A.hype=50;G.hypeStart=false;save()}
   ui={sel:null,place:null,move:false,ghost:null};renderAll();
 }
+/* ---------- Siege Night (defend mode) ----------
+   The same simulation runs in reverse: A.bs is a copy of your own base and A.units are CPU attackers
+   that arrive in waves from the edges. Your defenses fire on their own; you spend Spirit on abilities. */
+const DEF=CFG.defend;
+let lobbyMode='raid';   // which match the Lobby's Ready button starts: raid | defend
+function startSiege(){
+  if(!Match.go('Ready'))return;
+  if(A&&A.base.layout)G.layoutBag.push(A.base.layout);   // the rival preview was never played
+  const L=CL(),bs=G.buildings.filter(b=>b.lvl>0).map(b=>{const hp=B[b.type].hp[b.lvl-1]*DEF.homeTurfHp;return{type:b.type,x:b.x,y:b.y,lvl:b.lvl,hp,max:hp,cd:Math.random(),alive:true,aim:-1.57}});
+  A={mode:'defend',base:{name:G.letters,lvl:L,layoutName:'Your house',loot:{dues:DEF.rewards.duesPerLevel*L,clout:DEF.rewards.cloutPerLevel*L}},bs,units:[],projs:[],fx:[],zones:[],
+    t:CFG.match.duration,sel:'ab:strike',deployed:0,lost:0,pct:0,stars:0,chapterDown:false,hype:0,rager:0,revenge:null,
+    forbid:[...Array(GRID)].map(()=>Array(GRID).fill(false)),readyT:CFG.match.readySeconds,endIn:null,result:null,
+    wave:0,waveT:DEF.firstWaveIn,spawnQ:[],spawnT:0,spirit:DEF.spirit.start,elapsed:0};
+  ui={sel:null,place:null,move:false,ghost:null};renderAll();
+}
+function buildWave(w){
+  const pool=[['swarm',5],['light',2]];if(w>=2)pool.push(['balloon',2],['gargoyle',1]);if(w>=3)pool.push(['heavy',1]);if(CL()>=2&&w>=2)pool.push(['frisbee',1]);
+  const tot=pool.reduce((a,p)=>a+p[1],0),n=DEF.baseCount+DEF.perWave*w+DEF.perLevel*CL(),out=[];
+  for(let i=0;i<n;i++){let r=Math.random()*tot;for(const[k,wt]of pool){if((r-=wt)<0){out.push(k);break}}}
+  return out;
+}
+function spawnEnemy(k){
+  const t=T[k],side=Math.random()*4|0,a=.5+Math.random()*(GRID-1),e=.35,boost=1+(CL()-1)*DEF.enemyBoostPerLevel;
+  const[x,y]=side===0?[a,e]:side===1?[GRID-e,a]:side===2?[a,GRID-e]:[e,a];
+  A.units.push({k,x,y,hp:t.hp*boost,max:t.hp*boost,boost,cd:.8,stun:0,tgt:null,wall:null,seed:Math.random(),dir:0,born:tick(),enemy:true});
+  A.deployed++;
+}
+function stepWaves(dt){
+  A.elapsed+=dt;
+  A.spirit=Math.min(DEF.spirit.max,A.spirit+DEF.spirit.perSecond*dt);
+  if(A.spawnQ.length){A.spawnT-=dt;if(A.spawnT<=0){A.spawnT=DEF.spawnEvery;spawnEnemy(A.spawnQ.shift())}return}
+  if(A.wave>=DEF.waves)return;
+  if(A.wave>0&&!A.units.length)A.waveT=Math.min(A.waveT,3);
+  A.waveT-=dt;
+  if(A.waveT<=0){A.wave++;A.spawnQ=buildWave(A.wave);A.waveT=DEF.waveEvery;Sfx.play('horn');toast(A.wave===DEF.waves?`Final wave! ${A.spawnQ.length} attackers incoming.`:`Wave ${A.wave} of ${DEF.waves}: ${A.spawnQ.length} attackers incoming.`)}
+}
+function castAbility(k,x,y){
+  const ab=DEF.abilities[k];
+  if(A.spirit<ab.cost){toast(`${ab.name} needs ${ab.cost} Spirit. It refills over time.`);return}
+  if(k==='wall'){
+    const tx=Math.floor(x),ty=Math.floor(y);
+    if(!fits(tx,ty,1,A.bs)){toast('Something is already there. Drop the hedge on open lawn.');return}
+    const l=Math.min(5,CL()),hp=B.hedge.hp[l-1];A.bs.push({type:'hedge',x:tx,y:ty,lvl:l,hp,max:hp,cd:0,alive:true,aim:0,born:tick()});
+    A.fx.push({type:'ring',x:tx+.5,y:ty+.5,r:.7,t:.3,max:.3,color:'#62b357'});Sfx.play('build');
+  }else if(k==='strike'){
+    A.zones.push({k:'strike',x,y,r:ab.radius,t:.6,max:.6});
+    for(const u of A.units)if(Math.hypot(u.x-x,u.y-y)<ab.radius)u.hp-=ab.damage;
+    Sfx.play('boom');shake(3);burst(x,y,14,'#6fd8ff');
+  }else{
+    A.zones.push({k:'airhorn',x,y,r:ab.radius,t:.6,max:.6});
+    for(const u of A.units)if(Math.hypot(u.x-x,u.y-y)<ab.radius)u.stun=Math.max(u.stun,ab.stunSeconds);
+    Sfx.play('horn');
+  }
+  A.spirit-=ab.cost;renderBottom();
+}
+
 // Ready -> InMatch once the countdown runs out
 function tickReady(dt){
   A.readyT-=dt;
@@ -821,10 +883,10 @@ function damageB(b,d){
   if(b.hp<=0){
     b.hp=0;b.alive=false;b.died=tick();const c=center(b);
     A.fx.push({type:'boom',x:c.x,y:c.y,t:.7,max:.7});
-    if(b.type!=='hedge'){Sfx.play('boom');quest('destroy',1);shake(b.type==='chapter'?7:3.5);burst(c.x,c.y,b.type==='chapter'?26:12,B[b.type].color)}
+    if(b.type!=='hedge'){Sfx.play('boom');if(A.mode!=='defend')quest('destroy',1);shake(b.type==='chapter'?7:3.5);burst(c.x,c.y,b.type==='chapter'?26:12,B[b.type].color)}
     if(b.type==='chapter')A.chapterDown=true;
     const all=A.bs.filter(o=>o.type!=='hedge'),down=all.filter(o=>!o.alive).length;
-    if(b.type!=='hedge'&&A.rager<=0){const was=A.hype;A.hype=Math.min(100,A.hype+100/Math.max(3,all.length*.3));if(was<100&&A.hype>=100){toast('Hype is maxed. Throw a Rager!');renderBottom()}}
+    if(b.type!=='hedge'&&A.rager<=0&&A.mode!=='defend'){const was=A.hype;A.hype=Math.min(100,A.hype+100/Math.max(3,all.length*.3));if(was<100&&A.hype>=100){toast('Hype is maxed. Throw a Rager!');renderBottom()}}
     A.pct=Math.floor(down/all.length*100);
     A.stars=A.pct===100?3:(A.pct>=50?1:0)+(A.chapterDown?1:0);
     A.forbid=forbidGrid(A.bs.filter(o=>o.alive));
@@ -850,6 +912,7 @@ function throwRager(){
 }
 function deployAt(x,y){
   if(Match.state!=='InMatch'||!A.sel)return;
+  if(A.mode==='defend')return A.sel.startsWith('ab:')&&castAbility(A.sel.slice(3),x,y);
   if(A.sel.startsWith('p:'))return castPrank(A.sel.slice(2),x,y);
   const k=A.sel;
   if(!(G.army[k]>0)){toast(`No ${T[k].name}s left. Pick another troop.`);return}
@@ -864,7 +927,7 @@ function deployAt(x,y){
   renderBottom();
 }
 function stepRaid(dt){
-  A.t-=dt;
+  if(A.mode==='defend')stepWaves(dt);else A.t-=dt;
   const wasRager=A.rager>0;if(A.rager>0)A.rager-=dt;
   if(wasRager&&A.rager<=0)renderBottom();
   const spdM=A.rager>0?1.45:1,dmgM=A.rager>0?1.6:1;
@@ -930,23 +993,27 @@ function stepRaid(dt){
   for(const f of A.fx)f.t-=dt;A.fx=A.fx.filter(f=>f.t>0);
   const left=inLoadout().some(k=>(G.army[k]||0)>0);
   if(A.endIn!=null)A.endIn-=dt;
-  if(A.t<=0||(A.deployed>0&&!A.units.length&&!left)||(A.endIn!=null&&A.endIn<=0)){A.t=Math.max(0,A.t);finishMatch()}
+  if(A.mode==='defend'){if(A.chapterDown||(A.wave>=DEF.waves&&!A.spawnQ.length&&!A.units.length))finishMatch()}
+  else if(A.t<=0||(A.deployed>0&&!A.units.length&&!left)||(A.endIn!=null&&A.endIn<=0)){A.t=Math.max(0,A.t);finishMatch()}
   updateRaidHud();
 }
 // InMatch -> Results. Rewards are paid here and only here, so they land exactly once per match.
 function finishMatch(){
   if(!Match.go('Results'))return;
   stopHold();
-  const c=cap();
-  const gd=Math.max(0,Math.min(Math.floor(A.base.loot.dues*A.pct/100),Math.floor(c-G.dues)));
-  const gc=Math.max(0,Math.min(Math.floor(A.base.loot.clout*A.pct/100),Math.floor(c-G.clout)));
+  const c=cap(),siege=A.mode==='defend';
+  // Siege Night: stars for how much of your house is still standing; a fallen Chapter House is a loss
+  if(siege)A.stars=A.chapterDown?0:A.pct<10?3:A.pct<35?2:1;
+  const frac=siege?A.stars/3:A.pct/100;
+  const gd=Math.max(0,Math.min(Math.floor(A.base.loot.dues*frac),Math.floor(c-G.dues)));
+  const gc=Math.max(0,Math.min(Math.floor(A.base.loot.clout*frac),Math.floor(c-G.clout)));
   G.dues+=gd;G.clout+=gc;
   const gg=A.stars*CFG.match.gemsPerStar;G.gems+=gg;
-  let rep=A.stars?A.stars*8+Math.max(0,A.base.lvl-CL())*4:-5;
+  let rep=siege?(A.stars?A.stars*5:-3):A.stars?A.stars*8+Math.max(0,A.base.lvl-CL())*4:-5;
   const avenged=A.revenge&&A.stars>0;
   if(avenged){rep+=6;const e=G.log.find(x=>x.id===A.revenge.id);if(e)e.avenged=true}
   G.rep=Math.max(0,G.rep+rep);save();
-  const won=A.stars>0,secs=Math.round(CFG.match.duration-A.t);
+  const won=A.stars>0,secs=Math.round(siege?A.elapsed:CFG.match.duration-A.t);
   Sfx.play(won?'win':'lose');if(won)confetti();
   if(won)quest('win',1);if(A.stars===3)quest('star3',1);
   let chest=null,chestFull=false;if(won){const t=rollChest();if(addChest(t))chest=t;else chestFull=true}
@@ -956,8 +1023,8 @@ function finishMatch(){
   const st=[0,1,2].map(i=>i<A.stars?'★':'<span class="off">★</span>').join('');
   openSheet(`<div class="head"><h3 style="color:${won?'var(--gold)':'var(--danger)'}">${won?'Victory':'Defeat'}</h3></div>
     <div class="big-stars">${st}</div>
-    <p style="text-align:center;margin:0;font-size:18px">${A.pct}% of ${A.base.name} destroyed${A.chapterDown?', Chapter House down':''}.</p>
-    <div class="stats" style="justify-content:center"><span>Time <b>${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}</b></span><span>Troops sent <b>${A.deployed}</b></span><span>Troops lost <b>${A.lost}</b></span></div>
+    <p style="text-align:center;margin:0;font-size:18px">${siege?(A.chapterDown?'Your Chapter House fell.':`You held the house. ${100-A.pct}% still standing.`):`${A.pct}% of ${A.base.name} destroyed${A.chapterDown?', Chapter House down':''}.`}</p>
+    <div class="stats" style="justify-content:center"><span>Time <b>${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}</b></span>${siege?`<span>Waves <b>${A.wave}/${DEF.waves}</b></span><span>Attackers stopped <b>${A.lost}</b></span>`:`<span>Troops sent <b>${A.deployed}</b></span><span>Troops lost <b>${A.lost}</b></span>`}</div>
     <div class="loot"><span class="d">+${fmt(gd)} Dues</span><span class="c">+${fmt(gc)} Clout</span>${gg?`<span class="g">+${gg} Gems</span>`:''}</div>
     <p style="text-align:center;margin:0;color:var(--muted)">Rep ${rep>=0?'+':''}${rep}${avenged?' · Revenge served':''}</p>
     ${chest?`<div class="won-chest"><img src="${chestIcon(chest)}" alt=""><span>You won a <b>${CH.types[chest].name}</b>. Unlock it in the Lobby.</span></div>`:chestFull?'<p style="text-align:center;margin:0;color:var(--danger)">Chest slots are full. Open a chest to make room.</p>':''}
@@ -1026,7 +1093,7 @@ function buildLawn(){
   const v=g.createRadialGradient(LOG/2,LOG/2,LOG*.3,LOG/2,LOG/2,LOG*.78);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,`rgba(0,0,0,${LAWN.vignette})`);g.fillStyle=v;g.fillRect(0,0,LOG,LOG);
   lawnCv=c;lawnScale=scale;
 }
-const showingRival=()=>!!A&&(!inMenus()||page==='lobby');
+const showingRival=()=>!!A&&(!inMenus()||(page==='lobby'&&lobbyMode==='raid'));
 function drawLawn(){if(!lawnCv||lawnScale!==scale)buildLawn();ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(lawnCv,0,0);ctx.restore()}
 
 // scenery sits mostly on the outer two rings of tiles, where buildings rarely go
@@ -1322,11 +1389,12 @@ function drawUnit(u){
   if(u.buff||(A&&A.rager>0)){ctx.strokeStyle=A&&A.rager>0?'#ffc83d':'rgba(255,200,61,.7)';ctx.lineWidth=1.3;ctx.beginPath();ctx.ellipse(x,y+r*.9,r*.95,r*.36,0,0,7);ctx.stroke()}
   // pop in when dropped, bounce while walking
   const sp=u.born?easeBack((tm-u.born)/.28):1,bob=u.moving&&!t.air?Math.abs(Math.sin(tm*11+(u.seed||0)*20))*s*.16:0;
+  if(u.enemy){ctx.strokeStyle='rgba(255,107,94,.9)';ctx.lineWidth=1.4;ctx.beginPath();ctx.ellipse(x,y+r*.9,r*.95,r*.36,0,0,7);ctx.stroke()}
   ctx.save();ctx.translate(x,y-lift-bob);ctx.scale(sp,sp);if(Math.cos(u.dir||0)<0)ctx.scale(-1,1);
   SPRITE[u.k](s,u,tm,!!u.moving);
   ctx.restore();
   const top=y-lift-s*1.35;
-  if(u.hp<u.max){const w=r*2+2;ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(x-w/2,top-4,w,2.5);ctx.fillStyle='#4aa8ff';ctx.fillRect(x-w/2,top-4,w*Math.max(0,u.hp)/u.max,2.5)}
+  if(u.hp<u.max){const w=r*2+2;ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(x-w/2,top-4,w,2.5);ctx.fillStyle=u.enemy?PAL.danger:'#4aa8ff';ctx.fillRect(x-w/2,top-4,w*Math.max(0,u.hp)/u.max,2.5)}
   if(u.stun>0){ctx.fillStyle='#d8b8ff';ctx.font=`8px ${DISPLAY}`;ctx.textAlign='center';ctx.fillText('♪',x,top-6)}
 }
 function drawProj(p){
@@ -1379,7 +1447,7 @@ function draw(){
     ctx.fillStyle='rgba(255,80,70,.10)';
     for(let y=0;y<GRID;y++)for(let x=0;x<GRID;x++)if(A.forbid[y][x])ctx.fillRect(x*TS,y*TS,TS,TS);
     for(const z of A.zones){
-      const a=z.t/z.max,col=z.k==='pizza'?'#ffb347':z.k==='airhorn'?'#c99bff':'#ff7ab8';
+      const a=z.t/z.max,col=z.k==='pizza'?'#ffb347':z.k==='airhorn'?'#c99bff':z.k==='strike'?'#6fd8ff':'#ff7ab8';
       ctx.globalAlpha=z.k==='pizza'?.22:a*.45;ctx.fillStyle=col;ctx.beginPath();ctx.arc(z.x*TS,z.y*TS,z.r*TS*(z.k==='pizza'?1:1.15-a*.15),0,7);ctx.fill();
       ctx.globalAlpha=z.k==='pizza'?.8:a;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.setLineDash(z.k==='pizza'?[5,4]:[]);ctx.stroke();ctx.setLineDash([]);
       if(z.k==='glitter')for(let i=0;i<14;i++){const an=i*2.4,rd=z.r*TS*((i*.37)%1)*(1.2-a*.3);ctx.fillStyle=['#ffc83d','#ff7ab8','#6fd8ff'][i%3];ctx.fillRect(z.x*TS+Math.cos(an)*rd,z.y*TS+Math.sin(an)*rd,3,3)}
@@ -1402,7 +1470,7 @@ function draw(){
     const k=clamp(A.readyT/CFG.match.readySeconds,0,1);
     ctx.fillStyle='rgba(8,14,10,.55)';ctx.fillRect(0,0,LOG,LOG);
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=PAL.gold;ctx.font=`34px ${DISPLAY}`;ctx.fillText('Get ready',LOG/2,LOG/2-14);
-    ctx.fillStyle=PAL.ink;ctx.font=`15px ${BODY}`;ctx.fillText(`Raiding ${A.base.name}`,LOG/2,LOG/2+16);
+    ctx.fillStyle=PAL.ink;ctx.font=`15px ${BODY}`;ctx.fillText(A.mode==='defend'?'Defend your house':`Raiding ${A.base.name}`,LOG/2,LOG/2+16);
     ctx.fillStyle='rgba(255,255,255,.15)';rr(LOG/2-60,LOG/2+34,120,6,3);ctx.fill();ctx.fillStyle=PAL.gold;rr(LOG/2-60,LOG/2+34,120*(1-k),6,3);ctx.fill();
     ctx.textBaseline='alphabetic';
   }
@@ -1433,6 +1501,14 @@ function updateHud(){
 function updateRaidHud(){
   if(!A||inMenus())return;
   $('rName').textContent=A.base.name;
+  if(A.mode==='defend'){
+    $('rName').textContent='Siege Night';$('rSub').textContent=`Defending ${A.base.name} · Level ${A.base.lvl}`;
+    $('rTime').textContent=A.wave?`Wave ${A.wave}/${DEF.waves}`:`Wave 1 in ${Math.ceil(Math.max(0,A.waveT))}`;
+    $('rStars').textContent='';$('rPct').textContent=`${100-A.pct}% standing`;
+    const sp=$('spiritB');if(sp){sp.style.setProperty('--h',A.spirit/DEF.spirit.max*100);sp.querySelector('.c').textContent=Math.floor(A.spirit)+'/'+DEF.spirit.max}
+    document.querySelectorAll('[data-ab]').forEach(el=>el.classList.toggle('dim',A.spirit<DEF.abilities[el.dataset.ab].cost));
+    return;
+  }
   $('rSub').textContent=`${A.revenge?'Revenge · ':''}Level ${A.base.lvl} · ${A.base.layoutName}`;
   const rg=$('ragerB');if(rg){rg.style.setProperty('--h',A.rager>0?100:A.hype);rg.querySelector('.c').textContent=A.rager>0?Math.ceil(A.rager)+'s':Math.floor(A.hype)+'%';const full=A.hype>=100&&A.rager<=0;if(rg.classList.contains('full')!==full)rg.classList.toggle('full',full)}
   const s=Math.ceil(A.t);$('rTime').textContent=`${s/60|0}:${String(s%60).padStart(2,'0')}`;
@@ -1687,10 +1763,19 @@ function renderLobby(){
   const li=leagueIdx(),nx=LEAGUES[li+1];
   $('playerSub').innerHTML=`${LEAGUES[li].name} · Rep ${G.rep}${nx?` / ${nx.rep}`:''}<span class="lbar"><span style="width:${nx?Math.min(100,(G.rep-LEAGUES[li].rep)/(nx.rep-LEAGUES[li].rep)*100):100}%"></span></span>`;
   renderChests();
-  $('lobbySub').textContent=A.revenge?'REVENGE':'NEXT MATCH';
+  $('lobbySub').textContent=lobbyMode==='defend'?'SIEGE NIGHT':A.revenge?'REVENGE':'NEXT MATCH';
   const slots=lo.map(k=>`<div class="slot ${(G.army[k]||0)?'':'empty'}"><img src="${troopIcon(k)}" alt=""><b>×${G.army[k]||0}</b>${T[k].name.split(' ')[0]}</div>`).join('')
     +Array(LOADOUT_MAX-lo.length).fill('<div class="slot empty"><img alt="" style="border-style:dashed"><b>–</b>Empty</div>').join('');
-  $('lobbyInfo').innerHTML=`
+  const seg=`<div class="seg" role="tablist"><button role="tab" data-mode="raid" aria-selected="${lobbyMode==='raid'}">Raid a rival</button><button role="tab" data-mode="defend" aria-selected="${lobbyMode==='defend'}">Siege Night</button></div>`;
+  if(lobbyMode==='defend'){
+    $('lobbyInfo').innerHTML=seg+`<div class="card"><h3>Siege Night</h3><p>${DEF.waves} waves of rival troops storm your house from every side. Your own defenses fight back, and you spend Spirit on Water Strikes, Air Horns and Hedge Drops. Keep the Chapter House standing to win.</p>
+      <div class="stats"><span>Your defense <b>${Math.round(defenseScore())}</b></span><span>Reward up to <b style="color:var(--dues)">${fmt(DEF.rewards.duesPerLevel*CL())} D</b> and <b style="color:var(--clout)">${fmt(DEF.rewards.cloutPerLevel*CL())} C</b></span></div>
+      <p>Tip: upgrade Balloon Launchers, Nerf Turrets and Speaker Stacks on your Base to hold out longer.</p></div>`;
+    $('readyBtn').disabled=false;
+    $('lobbyInfo').querySelectorAll('[data-mode]').forEach(el=>el.onclick=()=>{lobbyMode=el.dataset.mode;renderAll()});
+    return;
+  }
+  $('lobbyInfo').innerHTML=seg+`
     <div class="card"><div class="opp"><div><b>${A.base.name}</b><span class="m">Level ${A.base.lvl} chapter · ${A.base.layoutName}${A.revenge?' · Revenge':''}</span>
       <span class="m">Loot up to <span style="color:var(--dues)">${fmt(A.base.loot.dues)} D</span> and <span style="color:var(--clout)">${fmt(A.base.loot.clout)} C</span></span></div>
       <button class="btn ghost" id="nextOpp">Find another <span class="cost dues">${CFG.match.findAnotherCost} D</span></button></div></div>
@@ -1710,6 +1795,7 @@ function renderLobby(){
   const fc=CFG.match.findAnotherCost;
   $('nextOpp').onclick=()=>{if(!inMenus())return;if(G.dues<fc){toast(`You need ${fc} Dues to find another rival.`);return}G.dues-=fc;save();findOpponent();renderAll()};
   $('editLo').onclick=()=>setPage('troops');
+  $('lobbyInfo').querySelectorAll('[data-mode]').forEach(el=>el.onclick=()=>{lobbyMode=el.dataset.mode;renderAll()});
   $('lobbyInfo').querySelectorAll('[data-up]').forEach(el=>el.onclick=()=>{
     const k=el.dataset.up,to=troopLevel(k)+1;
     if(buyTroopUpgrade(k)){Sfx.play('level');toast(`${T[k].name} upgraded to level ${to}.`);renderLobby()}
@@ -1728,11 +1814,19 @@ function renderChests(){
 
 /* ---------- match ---------- */
 function renderMatch(){
+  if(A.mode==='defend'){$('matchPanel').textContent='Your defenses fire on their own. Pick an ability, then tap the lawn: Water Strike splashes attackers, Air Horn stuns them, Hedge Drop blocks their path.';renderBottom();return}
   $('matchPanel').textContent=Match.state==='Ready'?'Get ready. Pick a troop below, then drop it on the open lawn once the match starts.':`${A.revenge?'Revenge on':'Raiding'} ${A.base.name}. Tap or hold open lawn to drop troops. Pranks land anywhere. Knock buildings down to build Hype, then throw a Rager.`;
   renderBottom();
 }
 function renderBottom(){
   const bt=$('bottom');
+  if(A.mode==='defend'){
+    const abs=Object.entries(DEF.abilities).map(([k,a])=>`<button class="chip prank ${A.sel==='ab:'+k?'on':''}" data-k="ab:${k}" data-ab="${k}"><span class="g">${a.glyph}</span><span class="n">${a.name}</span><span class="c">${a.cost} Spirit</span></button>`).join('');
+    bt.innerHTML=`<div class="troops"><div class="chip rager full" id="spiritB" style="--h:${A.spirit/DEF.spirit.max*100}"><span class="g">✦</span><span class="n">Spirit</span><span class="c">${Math.floor(A.spirit)}/${DEF.spirit.max}</span></div>${abs}<button class="chip" id="endB" style="border-color:#5a2a25"><span class="g" style="background:var(--danger);border-color:var(--danger-d)">✕</span><span class="n">Give up</span></button></div>`;
+    bt.querySelectorAll('[data-k]').forEach(el=>el.onclick=()=>{A.sel=el.dataset.k;renderBottom()});
+    $('endB').onclick=()=>{A.chapterDown=true;finishMatch()};
+    updateRaidHud();return;
+  }
   const chips=inLoadout().filter(k=>(G.army[k]||0)>0||A.sel===k).map(k=>`<button class="chip ${A.sel===k?'on':''}" data-k="${k}"><span class="g" style="background:#22352a url(${troopIcon(k)}) center/cover"></span><span class="n">${T[k].name}</span><span class="c">×${G.army[k]||0}</span></button>`).join('')
     +Object.keys(P).filter(k=>(G.pranks[k]||0)>0||A.sel==='p:'+k).map(k=>`<button class="chip prank ${A.sel==='p:'+k?'on':''}" data-k="p:${k}"><span class="g">${P[k].glyph}</span><span class="n">${P[k].name}</span><span class="c">×${G.pranks[k]||0}</span></button>`).join('');
   const live=A.rager>0,full=!live&&A.hype>=100;
@@ -1822,7 +1916,7 @@ cv.addEventListener('pointerdown',e=>{
   const p=tileAt(e);holdPos=p;
   if(Match.state==='InMatch'){
     deployAt(p.x,p.y);clearInterval(hold);
-    if(A&&A.sel&&A.sel.startsWith('p:'))return;
+    if(A&&A.sel&&(A.sel.startsWith('p:')||A.mode==='defend'))return;
     hold=setInterval(()=>{if(holdPos)deployAt(holdPos.x,holdPos.y)},140);
     try{cv.setPointerCapture(e.pointerId)}catch(_){}
     return;
