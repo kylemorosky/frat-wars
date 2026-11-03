@@ -1753,9 +1753,13 @@ function drawChest(type){
   if(type==='magic'){for(const[x,y]of[[16,12],[58,10],[64,30]]){ctx.fillStyle='#ffd0f2';ctx.font=`10px ${DISPLAY}`;ctx.textAlign='center';ctx.fillText('✦',x,y)}}
 }
 const chestIcon=type=>iconURL('c'+type,()=>drawChest(type));
-const giftIcon=g=>iconURL('g'+g.id,GIFT_ART[g.art]);
+const giftIcon=g=>g.chest?chestIcon(g.chest):iconURL('g'+g.id,GIFT_ART[g.art]);
 const capRoom=r=>Math.max(0,Math.floor(cap()-G[r]));
 const GIFTS=[
+  {id:'silverchest',chest:'silver',name:'Silver Chest',desc:'Goes straight into a free chest slot, ready to unlock.',cur:'gems',price:18,
+    check:()=>G.chests.length>=CH.slots?'Your chest slots are full. Open one in the Lobby first.':'',apply:()=>{addChest('silver');return'Silver Chest added to your Lobby'}},
+  {id:'goldchest',chest:'gold',name:'Golden Chest',desc:'A big haul of Dues, Clout and Gems.',cur:'gems',price:45,
+    check:()=>G.chests.length>=CH.slots?'Your chest slots are full. Open one in the Lobby first.':'',apply:()=>{addChest('gold');return'Golden Chest added to your Lobby'}},
   {id:'keg',art:'keg',name:'Dues Keg',desc:'+1,500 Dues for your treasury.',cur:'gems',price:15,
     check:()=>capRoom('dues')<1?'Your Dues storage is full.':'',note:()=>capRoom('dues')<1500?`Storage caps this at +${fmt(capRoom('dues'))}.`:'',
     apply:()=>{const n=Math.min(1500,capRoom('dues'));G.dues+=n;return`+${fmt(n)} Dues`}},

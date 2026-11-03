@@ -25,7 +25,9 @@ Each CPU match uses one of six base layouts (Ring Fort, West Wall, Corner Keep, 
 
 **Siege Night** (switch modes at the top of the Lobby) flips the match around: three waves of rival troops attack your own base. Your defenses fire on their own, and you spend Spirit, which refills over time, on Water Strikes, Air Horns and Hedge Drops. Keep the Chapter House standing to win.
 
-Wins also drop **chests** (one unlocks at a time, or open early with Gems), climb **leagues** with Rep, and count toward three **daily quests**. Logging in each day builds a seven-day **daily reward** streak.
+The Base page shows a few students wandering the lawn, the board darkens at night by your device's clock, and the game has sound effects and music (both can be turned off in Settings, the gear at the top right). New players get a three-step tutorial.
+
+Wins also drop **chests** (one unlocks at a time, or open early with Gems), climb **leagues** with Rep, and count toward three **daily quests**. Logging in each day builds a seven-day **daily reward** streak. The Shop also sells chests for Gems, and **Row Rankings** in the Lobby ranks you against AI chapters.
 
 The Lobby also has **Troop upgrades**. Each troop type has its own level from 1 to 10, and every troop of that type gets +10% health and damage per level. Level 2 costs 100 Dues, level 3 costs 200, and so on. Upgrades can only be bought in the Lobby. The costs, boost and max level are in `config.js`.
 
