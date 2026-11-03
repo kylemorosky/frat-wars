@@ -2,6 +2,10 @@
 
 A frat-row base builder in the spirit of Clash of Clans. Grow your chapter, stock pranks, raid rival frats, and get revenge on the ones who hit you.
 
+## Install on iPhone
+
+Host the folder over HTTPS (for example GitHub Pages), open it in Safari, tap Share, then **Add to Home Screen**. It launches full screen with its own icon and works offline.
+
 ## Play
 
 Open `index.html` in a browser. There's no build step. `index.html` holds the game, `config.js` holds the numbers you can tune, and `layouts.js` holds the CPU base layouts; keep all three in the same folder. Progress saves in your browser's local storage.
@@ -18,6 +22,12 @@ The tab bar at the bottom switches between four pages any time you're not in a m
 A match runs Lobby → Ready (a short countdown) → Match → Results (Victory or Defeat, with time, troops sent, troops lost and rewards) → **Return to lobby**. You can play as many CPU matches in a row as you like.
 
 Each CPU match uses one of six base layouts (Ring Fort, West Wall, Corner Keep, Long Hall, Diagonal, Four Pods). Every layout comes up once before any repeats, and the same layout never comes up twice in a row. To add a layout, add an entry to `layouts.js`; the comment at the top of that file explains the format.
+
+**Siege Night** (switch modes at the top of the Lobby) flips the match around: three waves of rival troops attack your own base. Your defenses fire on their own, and you spend Spirit, which refills over time, on Water Strikes, Air Horns and Hedge Drops. Keep the Chapter House standing to win.
+
+The Base page shows a few students wandering the lawn, the board darkens at night by your device's clock, and the game has sound effects and music (both can be turned off in Settings, the gear at the top right). New players get a three-step tutorial.
+
+Wins also drop **chests** (one unlocks at a time, or open early with Gems), climb **leagues** with Rep, and count toward three **daily quests**. Logging in each day builds a seven-day **daily reward** streak. The Shop also sells chests for Gems, and **Row Rankings** in the Lobby ranks you against AI chapters.
 
 The Lobby also has **Troop upgrades**. Each troop type has its own level from 1 to 10, and every troop of that type gets +10% health and damage per level. Level 2 costs 100 Dues, level 3 costs 200, and so on. Upgrades can only be bought in the Lobby. The costs, boost and max level are in `config.js`.
 
