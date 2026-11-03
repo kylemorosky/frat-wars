@@ -1220,6 +1220,12 @@ const ART={
     poly([[pl+1,e-1],[cx,e-11],[pr-1,e-1]],'#e2d4b0');
     circ(cx,e-5,2.6,'#7a2236');
     ctx.fillStyle='#cfc7b2';ctx.fillRect(pl-2,bt-1,pw+4,3);ctx.fillStyle='#bdb49d';ctx.fillRect(pl-4,bt+1.5,pw+8,2.5);
+    // upgrades show on the house: lanterns, then roof pennants, gold trim, and a crest at level 5
+    const lv=b.lvl||1;
+    if(lv>=2)for(const sx of[-9,9]){ctx.fillStyle='#2b2a35';ctx.fillRect(cx+sx-.6,bt-15,1.2,5);circ(cx+sx,bt-9,2.2,'#ffd77a');circ(cx+sx,bt-9,1,'#fff4cf')}
+    if(lv>=3)for(const[fx,dir]of[[L+9,-1],[R-9,1]]){ctx.fillStyle='#d9d2bf';ctx.fillRect(fx-.6,rt-10,1.2,10);poly([[fx,rt-10],[fx+7*dir,rt-7.5],[fx,rt-5]],lv>=4?'#ffc83d':'#a8306a')}
+    if(lv>=4){ctx.fillStyle='#ffc83d';ctx.fillRect(L+9,rt-1,R-L-18,1.6);ctx.fillRect(L-3,e,R-L+6,1.4)}
+    if(lv>=5){ctx.save();ctx.translate(cx,rt-6);ctx.fillStyle='#ffc83d';ctx.beginPath();for(let i=0;i<10;i++){const a=i/10*6.283-1.571,r=i%2?2.4:5.5;ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r)}ctx.closePath();ctx.fill();ctx.strokeStyle='#a97f17';ctx.lineWidth=.6;ctx.stroke();ctx.restore()}
   },
   annex(x,y,w){
     const L=x+4,R=x+w-4,e=y+w*.42,bt=y+w-5,cx=x+w/2;
@@ -1316,7 +1322,7 @@ const ART={
 const STATIC_ART={chapter:1,annex:1,duesbox:1,cloutbooth:1,closet:1,hedge:1},artCache=new Map();
 function drawArt(b,x,y,w,o){
   if(!STATIC_ART[b.type])return ART[b.type](x,y,w,b,o);
-  const key=`${b.type}|${b.type==='hedge'&&b.lvl>=3}|${b.type==='chapter'?o.letters||G.letters:''}|${scale}`;
+  const key=`${b.type}|${b.type==='hedge'&&b.lvl>=3}|${b.type==='chapter'?(o.letters||G.letters)+b.lvl:''}|${scale}`;
   let c=artCache.get(key);
   if(!c){
     const pad=TS;c=document.createElement('canvas');c.width=c.height=Math.ceil((w+pad*2)*scale);c.pad=pad;
@@ -1337,7 +1343,8 @@ function drawBuilding(b,o={}){
     return;
   }
   ctx.fillStyle='rgba(0,0,0,.28)';
-  if(d.def){ctx.beginPath();ctx.ellipse(x+w/2+2,y+w/2+4,w*.42,w*.38,0,0,7);ctx.fill()}
+  if(d.def){ctx.beginPath();ctx.ellipse(x+w/2+2,y+w/2+4,w*.42,w*.38,0,0,7);ctx.fill();
+    if(b.lvl>=2){ctx.strokeStyle=b.lvl>=5?'#ffc83d':b.lvl>=3?'#c9d3dd':'#c98a4a';ctx.lineWidth=1.6;ctx.beginPath();ctx.ellipse(x+w/2,y+w/2+1.5,w*.45,w*.42,0,0,7);ctx.stroke()}}
   else if(b.type!=='hedge'){rr(x+4,y+7,w-6,w-8,6);ctx.fill()}
   // tap bounce at home, shake and flash when hit in a raid
   const shake=o.raid&&b.hit>0?Math.sin(tick()*90)*1.6*b.hit/.16:0;
