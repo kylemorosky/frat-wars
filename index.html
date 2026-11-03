@@ -255,6 +255,14 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
 #coach span{font-size:16px;font-weight:700;line-height:1.3}
 #coach button{align-self:flex-end;border:0;background:none;color:#6b6556;font-size:12px;font-weight:700;cursor:pointer;padding:2px}
 
+@media (prefers-reduced-motion:no-preference){.big-stars .pop{display:inline-block;animation:starpop .45s cubic-bezier(.3,1.6,.5,1) both}}
+@keyframes starpop{from{transform:scale(0) rotate(-40deg);opacity:0}}
+.rankrow{display:grid;grid-template-columns:34px 1fr auto;gap:8px;align-items:center;padding:7px 10px;border-radius:10px;background:var(--panel2);font-size:14px}
+.rankrow b{font-family:var(--display);font-weight:400;font-size:15px}
+.rankrow .n{font-family:var(--display);color:var(--muted);text-align:center}
+.rankrow.me{background:linear-gradient(#3a5a2f,#2a4223);box-shadow:0 0 0 2px var(--gold)}
+.rankrow.top .n{color:var(--gold)}
+
 /* match */
 #matchPanel{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;color:var(--muted);font-size:14px;line-height:1.3}
 .troops{display:flex;gap:8px;overflow-x:auto;flex:none;padding:4px 0 2px}
@@ -1054,7 +1062,8 @@ function finishMatch(){
   let league=null;const li=leagueIdx();if(li>G.leagueSeen){league=LEAGUES[li];G.gems+=league.gems;G.leagueSeen=li}
   save();
   A.result={won,dues:gd,clout:gc,gems:gg,rep};
-  const st=[0,1,2].map(i=>i<A.stars?'★':'<span class="off">★</span>').join('');
+  const st=[0,1,2].map(i=>i<A.stars?`<span class="pop" style="animation-delay:${.25+i*.32}s">★</span>`:'<span class="off">★</span>').join('');
+  for(let i=0;i<A.stars;i++)setTimeout(()=>Sfx.play('coin'),still()?0:250+i*320);
   openSheet(`<div class="head"><h3 style="color:${won?'var(--gold)':'var(--danger)'}">${won?'Victory':'Defeat'}</h3></div>
     <div class="big-stars">${st}</div>
     <p style="text-align:center;margin:0;font-size:18px">${siege?(A.chapterDown?'Your Chapter House fell.':`You held the house. ${100-A.pct}% still standing.`):`${A.pct}% of ${A.base.name} destroyed${A.chapterDown?', Chapter House down':''}.`}</p>
@@ -1603,7 +1612,8 @@ function renderPanel(){
   }
   const b=ui.sel;
   if(!b){
-    p.innerHTML=`<h2>${G.letters} Chapter <span class="lv">LV ${CL()}</span></h2><p>Tap a building to collect, upgrade or move it.</p><div class="stats"><span>Builders <b>${2-busyCount()}/2</b></span><span>Army <b>${armyUsed()}/${armyCap()}</b></span><span>Pranks <b>${prankUsed()}/${prankCap()}</b></span><span>Defense <b>${Math.round(defenseScore())}</b></span><span>Storage <b>${fmt(cap())}</b> each</span></div>`;
+    const ready=G.buildings.filter(b=>B[b.type].gives&&stored(b)>=1);
+    p.innerHTML=`<h2>${G.letters} Chapter <span class="lv">LV ${CL()}</span></h2><p>Tap a building to collect, upgrade or move it.</p>${ready.length>1?`<div class="row"><button class="btn" id="colAll">Collect all (${ready.length})</button></div>`:''}<div class="stats"><span>Builders <b>${2-busyCount()}/2</b></span><span>Army <b>${armyUsed()}/${armyCap()}</b></span><span>Pranks <b>${prankUsed()}/${prankCap()}</b></span><span>Defense <b>${Math.round(defenseScore())}</b></span><span>Storage <b>${fmt(cap())}</b> each</span></div>`;
     return;
   }
   const d=B[b.type],L=b.lvl,stats=[];
@@ -1631,7 +1641,9 @@ function renderPanel(){
   $('armyBtn2')&&($('armyBtn2').onclick=()=>setPage('troops'));
   $('mvBtn').onclick=()=>{ui.move=true;ui.ghost=null;renderAll()};
 }
+function collectAll(){let n=0;G.buildings.forEach((b,i)=>{if(B[b.type].gives&&stored(b)>=1)setTimeout(()=>{collect(b,true);updateHud()},i*70),n++});if(n)setTimeout(renderAll,n*70+50)}
 function renderBaseActions(){
+  if($('colAll'))$('colAll').onclick=collectAll;
   const due=G.log.filter(e=>e.stars>0&&!e.avenged).length;
   const qd=questsReady();
   $('baseActions').innerHTML=`<div class="actions"><button class="btn ghost" id="buildBtn">Build</button><button class="btn ghost" id="questBtn">Quests${qd?`<span class="badge">${qd}</span>`:''}</button><button class="btn ghost" id="rivBtn">Rivals${due?`<span class="badge">${due}</span>`:''}</button><button class="btn red" id="raidBtn">Raid</button></div>`;
@@ -1858,14 +1870,14 @@ function renderLobby(){
         return`<div class="uprow"><img src="${troopIcon(k)}" alt=""><div><b>${T[k].name} · Level ${troopLevel(k)}</b><span>${troopLevel(k)>1?boostLabel(k):'No boost yet'}${c==null?'':` · next level costs ${fmt(c)} ${resName(UP.currency)}`}</span></div>
           ${c==null?'<button class="btn ghost" disabled>Max level</button>':`<button class="btn ${can?'':'ghost'}" data-up="${k}" ${can?'':'disabled'}>Upgrade <span class="cost ${UP.currency}">${fmt(c)} ${UP.currency==='dues'?'D':UP.currency==='clout'?'C':'G'}</span></button>`}</div>`}).join('')}</div>
       <p>Each level adds ${Math.round(UP.boostPerLevel*100)}% health and damage to every troop of that type. Max level ${UP.maxLevel}.</p></div>
-    <div class="card"><h3>Players</h3><div class="players">
+    <div class="card"><h3>Players <button class="btn ghost" id="rankBtn" style="padding:7px 12px;font-size:14px">Rankings</button></h3><div class="players">
       <div class="player"><span><b>${PLAYER_NAME}</b> · You</span><span class="tag ${ready?'ok':''}">${ready?'READY TO GO':'NO TROOPS'}</span></div>
       <div class="player"><span><b>${A.base.name}</b> · Level ${A.base.lvl}</span><span class="tag">AI RIVAL</span></div></div>
       <p>Online multiplayer isn't available yet. Every match is against an AI-run rival chapter.</p></div>`;
   $('readyBtn').disabled=!ready;
   const fc=CFG.match.findAnotherCost;
   $('nextOpp').onclick=()=>{if(!inMenus())return;if(G.dues<fc){toast(`You need ${fc} Dues to find another rival.`);return}G.dues-=fc;save();findOpponent();renderAll()};
-  $('editLo').onclick=()=>setPage('troops');
+  $('editLo').onclick=()=>setPage('troops');$('rankBtn').onclick=openRankings;
   $('lobbyInfo').querySelectorAll('[data-mode]').forEach(el=>el.onclick=()=>{lobbyMode=el.dataset.mode;renderAll()});
   $('lobbyInfo').querySelectorAll('[data-up]').forEach(el=>el.onclick=()=>{
     const k=el.dataset.up,to=troopLevel(k)+1;
@@ -1881,6 +1893,21 @@ function renderChests(){
     return`<button class="cslot ${ready?'ready':''}" data-c="${i}"><img src="${chestIcon(c.type)}" alt="${CH.types[c.type].name}"><span ${going?`data-chest="${i}"`:''}>${ready?'Open!':going?ftime(chestLeft(c)):'Tap to unlock'}</span></button>`}).join('');
   $('chestBar').innerHTML=slots;
   $('chestBar').querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>tapChest(+el.dataset.c));
+}
+
+// Row Rankings: your chapter against a fixed set of AI-run chapters whose Rep grows a little each day
+function rankings(){
+  const days=Math.floor(now()/864e5),r=mkRnd(7919),list=[];
+  for(let i=0;i<24;i++){const name=[0,0,0].map(()=>GREEK[r()*GREEK.length|0]).join(''),base=Math.round(Math.pow(r(),1.6)*900),grow=r()*3;list.push({name,rep:Math.round(base+grow*(days%60)),ai:true})}
+  list.push({name:G.letters,rep:G.rep,me:true});
+  return list.sort((a,b)=>b.rep-a.rep);
+}
+function openRankings(){
+  const list=rankings(),me=list.findIndex(x=>x.me);
+  const rows=list.map((x,i)=>`<div class="rankrow ${x.me?'me':''} ${i<3?'top':''}"><span class="n">${i+1}</span><span><b>${x.me?PLAYER_NAME+' · '+x.name:x.name}</b>${x.me?'':' <span class="tag">AI</span>'}</span><b>${fmt(x.rep)} Rep</b></div>`).join('');
+  openSheet(`<div class="head"><h3>Row Rankings</h3><button class="btn ghost" id="closeS">Close</button></div><p>You are ranked <b>#${me+1}</b> of ${list.length}. The other chapters are AI rivals.</p>${rows}`);
+  $('closeS').onclick=closeSheet;
+  setTimeout(()=>{const m=$('sheetCard').querySelector('.me');m&&m.scrollIntoView({block:'center'})},50);
 }
 
 /* ---------- match ---------- */
