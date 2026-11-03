@@ -247,6 +247,14 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
 .seg button[aria-selected=true]{background:linear-gradient(#2f4637,#233629);color:var(--gold);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
 .chip.dim{opacity:.45}
 
+#coachRing{position:fixed;z-index:35;border-radius:16px;box-shadow:0 0 0 3px var(--gold),0 0 0 9999px rgba(5,9,6,.45);pointer-events:none}
+@media (prefers-reduced-motion:no-preference){#coachRing{animation:ringp 1.2s ease-in-out infinite}}
+@keyframes ringp{50%{box-shadow:0 0 0 6px var(--gold),0 0 0 9999px rgba(5,9,6,.45)}}
+#coach{position:fixed;z-index:36;left:50%;transform:translateX(-50%);width:min(92vw,360px);background:#fffaf0;color:#1d241f;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+#coach b{font-family:var(--display);font-weight:400;font-size:13px;color:#a8306a;letter-spacing:.04em}
+#coach span{font-size:16px;font-weight:700;line-height:1.3}
+#coach button{align-self:flex-end;border:0;background:none;color:#6b6556;font-size:12px;font-weight:700;cursor:pointer;padding:2px}
+
 /* match */
 #matchPanel{flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;color:var(--muted);font-size:14px;line-height:1.3}
 .troops{display:flex;gap:8px;overflow-x:auto;flex:none;padding:4px 0 2px}
@@ -370,6 +378,8 @@ body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#17261d 0%,var(--bg)
   <button class="adcta" id="adCta"></button>
 </aside>
 <div id="toast" hidden></div>
+<div id="coachRing" hidden></div>
+<div id="coach" hidden><b id="coachStep"></b><span id="coachText"></span><button id="coachSkip">Skip tutorial</button></div>
 <div id="splash" role="dialog" aria-label="Frat Wars">
   <img src="icons/icon-512.png" alt="">
   <h1>Frat Wars</h1>
@@ -439,7 +449,7 @@ function fresh(){
   const t=now();let id=1;
   const mk=(type,x,y)=>({id:id++,type,x,y,lvl:1,busy:null,last:t-6*60000});
   const bs=[mk('chapter',7,7),mk('duesbox',3,3),mk('cloutbooth',13,3),mk('annex',3,13),mk('tent',13,12),mk('balloon',8,12)];
-  return{dues:500,clout:500,rep:0,letters:'ΠΛΔ',gems:40,army:{swarm:8,balloon:3},loadout:[...DEFAULT_LOADOUT],pranks:{},log:[],seen:t,buildings:bs,nextId:id};
+  return{tutorial:1,dues:500,clout:500,rep:0,letters:'ΠΛΔ',gems:40,army:{swarm:8,balloon:3},loadout:[...DEFAULT_LOADOUT],pranks:{},log:[],seen:t,buildings:bs,nextId:id};
 }
 function load(){
   let s=null;try{s=JSON.parse(localStorage.getItem(KEY))}catch(e){}
@@ -554,7 +564,7 @@ function collect(b,quiet){
   const take=Math.min(amt,Math.max(0,Math.floor(cap()-G[r])));
   if(take<=0){if(!quiet)toast(`${resName(r)} storage is full. Build or upgrade a Treasury Annex.`);return 0}
   G[r]+=take;b.last=now()-((amt-take)/d.rate[b.lvl-1])*60000;
-  floatText(b,'+'+take,r==='dues'?'#4fd18b':'#b48cff');Sfx.play('coin');quest('collect',take);flyCoins(b,r);save();return take;
+  floatText(b,'+'+take,r==='dues'?'#4fd18b':'#b48cff');Sfx.play('coin');if(b.type==='duesbox')setTimeout(()=>coachAdvance(1));quest('collect',take);flyCoins(b,r);save();return take;
 }
 function upgrade(b){
   const d=B[b.type],nl=b.lvl+1;
@@ -1538,7 +1548,7 @@ function floatText(b,text,color){const c=center(b);floats.push({x:c.x,y:c.y-B[b.
 let toastT;
 function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;t.style.opacity=1;clearTimeout(toastT);toastT=setTimeout(()=>{t.style.opacity=0;setTimeout(()=>t.hidden=true,200)},2200)}
 function openSheet(html,locked){$('sheetCard').innerHTML=html;$('sheet').hidden=false;$('sheet').dataset.locked=locked?'1':''}
-function closeSheet(){$('sheet').hidden=true}
+function closeSheet(){$('sheet').hidden=true;placeCoach()}
 $('sheet').addEventListener('click',e=>{if(e.target.id==='sheet'&&!$('sheet').dataset.locked)closeSheet()});
 
 // HUD numbers count toward the real balance instead of jumping
@@ -1902,10 +1912,30 @@ function showAd(){
   $('adHead').textContent=a.head;$('adBody').textContent=a.body;
   $('adCta').textContent=a.cta;$('adCta').style.background=a.col;
 }
-function syncAd(){$('ad').hidden=!adReady||adClosed||!inMenus()||page!=='base'}
+function syncAd(){$('ad').hidden=!adReady||adClosed||!inMenus()||page!=='base'||G.tutorial>0}
 $('adX').onclick=()=>{adClosed=true;clearInterval(adTimer);syncAd()};
 $('adCta').onclick=()=>toast('This ad is a placeholder.');
 setTimeout(()=>{adReady=true;showAd();syncAd();adTimer=setInterval(()=>{adI++;showAd()},12000)},1500);
+
+/* ---------- first-time tutorial ----------
+   Three steps for brand-new players: collect, open the Lobby, press Ready. Saves from before the
+   tutorial existed have no `tutorial` field and never see it. */
+const COACH=[null,
+  {text:'Tap your Dues Box to collect the Dues your members paid.',target:()=>{const b=G.buildings.find(x=>x.type==='duesbox');if(!b||!inMenus()||page!=='base')return null;const r=cv.getBoundingClientRect(),s=B.duesbox.size;return{left:r.left+b.x/GRID*r.width-6,top:r.top+b.y/GRID*r.height-6,width:s/GRID*r.width+12,height:s/GRID*r.height+12}}},
+  {text:'Nice. Now open the Lobby to find a rival chapter.',target:()=>inMenus()&&page!=='lobby'?document.querySelector('.tab[data-page=lobby]').getBoundingClientRect():null},
+  {text:'This is your next opponent. Press Ready to raid them. Drop troops on the open lawn, outside the red zone.',target:()=>inMenus()&&page==='lobby'?$('readyBtn').getBoundingClientRect():null},
+];
+function coachAdvance(from){if(G.tutorial===from){G.tutorial=from+1<COACH.length?from+1:0;save();placeCoach();syncAd()}}
+function placeCoach(){
+  const step=COACH[G.tutorial],ring=$('coachRing'),box=$('coach');
+  const r=step&&$('sheet').hidden&&!$('splash')?step.target():null;
+  if(!r){ring.hidden=box.hidden=true;return}
+  ring.hidden=box.hidden=false;
+  Object.assign(ring.style,{left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});
+  $('coachStep').textContent=`TUTORIAL ${G.tutorial} OF ${COACH.length-1}`;$('coachText').textContent=step.text;
+  const below=r.top<innerHeight*.5;box.style.top=below?Math.min(innerHeight-150,r.top+r.height+14)+'px':'';box.style.bottom=below?'':(innerHeight-r.top+14)+'px';
+}
+$('coachSkip').onclick=()=>{G.tutorial=0;save();placeCoach();syncAd()};
 
 /* ---------- splash and settings ---------- */
 function hideSplash(){
@@ -1957,6 +1987,9 @@ function renderAll(){
   else if(page==='troops')renderTroops();
   else renderLobby();
   hudKey='';updateHud();updateRaidHud();syncAd();fit();
+  if(inMenus()&&page==='lobby')coachAdvance(2);
+  if(!inMenus())coachAdvance(3);
+  placeCoach();
 }
 
 /* ---------- input ---------- */
@@ -2022,6 +2055,7 @@ function loop(t){
     if(inMenus()){finishBuilds();
       document.querySelectorAll('[data-until]').forEach(el=>el.textContent=ftime((+el.dataset.until-now())/1000));
       const r=$('readyV');if(r&&ui.sel)r.textContent=fmt(stored(ui.sel));
+      placeCoach();
       document.querySelectorAll('[data-chest]').forEach(el=>{const c=G.chests[+el.dataset.chest];if(!c)return;if(chestReady(c))renderChests();else el.textContent=ftime(chestLeft(c))});}
   }
   if(cv.isConnected&&!cv.parentNode.closest('[hidden]'))draw();
